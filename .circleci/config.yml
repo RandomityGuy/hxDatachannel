@@ -61,25 +61,17 @@ jobs:
             fi
 
       - run:
-          name: Install hashlink
+          name: Compile extension
           command: |
             mkdir -p ~/deps
             cd ~/deps
             git clone --depth=1 https://github.com/HaxeFoundation/hashlink
             cd hashlink
-            # Fix OpenAL
-            # curl -L https://github.com/nullobsi/hashlink/commit/a09491918cc4b83c2cb9fcded855fe967857385f.diff | git apply
-            cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_FIND_FRAMEWORK=LAST -DWITH_SQLITE=OFF -DWITH_FMT=OFF -DWITH_OPENAL=OFF -DWITH_SDL=OFF -DWITH_SSL=OFF -DWITH_UI=OFF -DWITH_UV=OFF -DBUILD_TESTING=OFF -DCMAKE_MACOSX_RPATH=TRUE
+            mv ~/datachannel/cpp libs/datachannel
+            echo "\nadd_subdirectory(datachannel)" >> libs/CMakeLists.txt
+            cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_FIND_FRAMEWORK=LAST -DWITH_SQLITE=OFF -DWITH_FMT=OFF -DWITH_OPENAL=OFF -DWITH_SDL=OFF -DWITH_SSL=OFF -DWITH_UI=OFF -DWITH_UV=OFF -DBUILD_TESTING=OFF -DCMAKE_MACOSX_RPATH=TRUE -DHASHLINK_LIBRARY_DIR="/usr/local/lib/" -DHASHLINK_INCLUDE_DIR="~/deps/hashlink/src"
             cmake --build build --config Release -j$NPROC
             sudo cmake --install build
-
-      - run:
-          name: Compile extension
-          command: |
-            export PATH=/tmp/haxe/:"$PATH"
-            export HAXE_STD_PATH=/tmp/haxe/std
-            cd ~/datachannel/cpp
-            cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_FIND_FRAMEWORK=LAST -DCMAKE_MACOSX_RPATH=TRUE -DHASHLINK_LIBRARY_DIR="/usr/local/lib/" -DHASHLINK_INCLUDE_DIR="~/deps/hashlink/src"
 
       - run:
           name: Compile MBHaxe
