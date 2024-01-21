@@ -1,0 +1,26 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "HashLink (launch)",
+			"request": "launch",
+			"type": "hl",
+			"cwd": "${workspaceFolder}",
+			"preLaunchTask": {
+				"type": "haxe",
+				"args": "active configuration"
+			}
+		},
+		{
+			"name": "HashLink (attach)",
+			"request": "attach",
+			"port": 6112,
+			"type": "hl",
+			"cwd": "${workspaceFolder}",
+			"preLaunchTask": {
+				"type": "haxe",
+				"args": "active configuration"
+			}
+		}
+	]
+}

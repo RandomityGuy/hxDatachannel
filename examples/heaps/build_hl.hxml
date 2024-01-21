@@ -1,0 +1,7 @@
+--library heaps
+--library hlsdl
+--library hxWebSockets
+--library datachannel
+--main Main
+-cp .
+--hl bin/main.hl

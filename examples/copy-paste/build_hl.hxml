@@ -1,0 +1,5 @@
+-cp .
+-D analyzer-optimize
+--library datachannel
+--main MainHL
+-hl bin/main.hl

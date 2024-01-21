@@ -1,0 +1,8 @@
+.vs
+cpp/out
+cpp/CMakeSettings.json
+bin
+index2.html
+examples/copy-paste/bin
+examples/heaps/bin
+node_modules

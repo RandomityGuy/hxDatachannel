@@ -1,0 +1,6 @@
+--library heaps
+--library hxWebSockets
+--library datachannel
+--main Main
+-cp .
+--js bin/main.js

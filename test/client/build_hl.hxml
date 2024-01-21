@@ -1,0 +1,5 @@
+-cp .
+--library datachannel
+--library hxWebSockets
+--main Main
+--hl bin/main.hl

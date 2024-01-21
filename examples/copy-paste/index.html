@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Test</title>
+</head>
+
+<body>
+    <h1>WebRTC Test</h1>
+    <p style="white-space: pre-line;">
+        Choose between two options to test WebRTC.
+        Offer will create a Local SDP to be pasted onto the other side. Then you should paste the remote SDP from the
+        other side.
+        Answer will take in the Remote SDP from below and will generate a Local SDP to be pasted onto the other side
+    </p>
+    <button id="offerbtn">Create Offer</button>
+    <button id="answerbtn">Create Answer</button>
+    <button id="rcvanswerbtn">Receive Answer</button>
+    <br />
+    <span>Local SDP:</span>
+    <br />
+    <textarea id="localsdp" style="width: 250px; height:250px"></textarea>
+    <br />
+    <span>Remote SDP:</span>
+    <br />
+    <textarea id="remotesdp" style="width: 250px; height:250px"></textarea>
+    <br />
+    <span id="connstatus">Connection Status:</span>
+    <br />
+    <span>Chat</span>
+    <br />
+    <textarea id="chatlog" style="width: 250px; height:250px" disabled></textarea>
+    <br />
+    <input type="text" id="chatinput" />
+</body>
+
+<script src="bin/main.js"></script>
+
+</html>
