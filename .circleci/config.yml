@@ -45,6 +45,7 @@ jobs:
             haxelib setup ~/haxelib
             haxelib list
             haxelib install hashlink
+            haxelib install hxWebSockets
           
 
       - run:
@@ -61,6 +62,85 @@ jobs:
             fi
 
       - run:
+          name: Compile jpeg-turbo (x86)
+          command: |
+            mkdir -p ~/deps
+            cd ~/deps
+            curl -L https://downloads.sourceforge.net/project/libjpeg-turbo/2.1.4/libjpeg-turbo-2.1.4.tar.gz | tar xz
+            cd libjpeg-turbo-2.1.4
+            if [ ! -f /usr/local/lib/libturbojpeg.0.2.0.dylib ]; then
+              cmake -S. -Bbuild-x86 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_MACOSX_RPATH=TRUE -DCMAKE_INSTALL_PREFIX=/usr/local
+              cmake --build build-x86 --config release -j$NPROC
+            fi
+
+      - run:
+          name: Compile jpeg-turbo (ARM64)
+          command: |
+            cd ~/deps/libjpeg-turbo-2.1.4
+            if [ ! -f /usr/local/lib/libturbojpeg.0.2.0.dylib ]; then
+              cmake -S. -Bbuild-arm64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_MACOSX_RPATH=TRUE -DCMAKE_INSTALL_PREFIX=/usr/local
+              cmake --build build-arm64 --config release -j$NPROC
+            fi
+
+      - run:
+          name: Install jpeg-turbo (Universal)
+          command: |
+            if [ ! -f /usr/local/lib/libturbojpeg.0.2.0.dylib ]; then
+              cd ~/deps/libjpeg-turbo-2.1.4/build-arm64
+              for i in libjpeg.62.3.0.dylib cjpeg cjpeg-static djpeg djpeg-static jcstest jpegtran jpegtran-static libjpeg.a libturbojpeg.a libturbojpeg.0.2.0.dylib rdjpgcom strtest tjbench tjbench-static tjexample tjunittest tjunittest-static wrjpgcom
+              do
+              lipo -create -output $i ../build-x86/$i $i
+              done
+              sudo cmake --install .
+            fi
+
+      - run:
+          name: Compile libpng (x86)
+          command: |
+            mkdir -p ~/deps
+            cd ~/deps
+            curl -L https://download.sourceforge.net/libpng/libpng-1.6.39.tar.xz | tar xz
+            cd libpng-1.6.39
+            if [ ! -f /usr/local/lib/libpng16.16.dylib ]; then
+              cmake -S. -Bbuild-x86 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_MACOSX_RPATH=TRUE
+              cmake --build build-x86 --config release -j$NPROC
+            fi
+
+      - run:
+          name: Compile libpng (arm64)
+          command: |
+            mkdir -p ~/deps
+            cd ~/deps
+            cd libpng-1.6.39
+            if [ ! -f /usr/local/lib/libpng16.16.dylib ]; then
+              cmake -S. -Bbuild-arm64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_MACOSX_RPATH=TRUE
+              cmake --build build-arm64 --config release -j$NPROC
+            fi
+
+      - run:
+          name: Install libpng (Universal)
+          command: |
+            if [ ! -f /usr/local/lib/libpng16.16.dylib ]; then
+              cd ~/deps/libpng-1.6.39/build-arm64
+              for i in libpng16.16.39.0.dylib libpng16.a png-fix-itxt pngfix pngimage pngstest pngtest pngunknown pngvalid
+              do
+              lipo -create -output $i ../build-x86/$i $i
+              done
+              sudo cmake --install .
+            fi
+
+      - run:
+          name: Compile libuv
+          command: |
+            mkdir -p ~/deps
+            cd ~/deps
+            curl -fsSL https://github.com/libuv/libuv/archive/refs/tags/v1.44.2.tar.gz | tar xz
+            cd libuv-1.44.2
+            cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_MACOSX_RPATH=TRUE
+            cmake --build build --config Release -j$NPROC
+            sudo cmake --install build
+
+      - run:
           name: Compile extension
           command: |
             mkdir -p ~/deps
@@ -69,21 +149,21 @@ jobs:
             cd hashlink
             mv ~/datachannel/cpp libs/datachannel
             echo -e "\nadd_subdirectory(datachannel)" >> libs/CMakeLists.txt
-            cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_FIND_FRAMEWORK=LAST -DWITH_SQLITE=OFF -DWITH_FMT=OFF -DWITH_OPENAL=OFF -DWITH_SDL=OFF -DWITH_SSL=OFF -DWITH_UI=OFF -DWITH_UV=OFF -DBUILD_TESTING=OFF -DCMAKE_MACOSX_RPATH=TRUE -DHASHLINK_LIBRARY_DIR="/usr/local/lib/" -DHASHLINK_INCLUDE_DIR="~/deps/hashlink/src"
+            cmake -S. -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET="10.15" -DCMAKE_FIND_FRAMEWORK=LAST -DWITH_SQLITE=OFF -DWITH_FMT=ON -DWITH_OPENAL=OFF -DWITH_SDL=OFF -DWITH_SSL=ON -DWITH_UV=ON -DBUILD_TESTING=OFF -DCMAKE_MACOSX_RPATH=TRUE -DHASHLINK_LIBRARY_DIR="/usr/local/lib/" -DHASHLINK_INCLUDE_DIR="~/deps/hashlink/src"
             cmake --build build --config Release -j$NPROC
             sudo cmake --install build
 
       - run:
-          name: Compile MBHaxe
+          name: Test extension
           command: |
             export PATH=/tmp/haxe/:"$PATH"
             export HAXE_STD_PATH=/tmp/haxe/std
-            cd ~/MBHaxe
-            haxe compile-macos.hxml
-            cd native
-            cp ~/deps/hashlink/src/hlc_main.c .
-            clang -mmacosx-version-min=10.15 -arch x86_64 -arch arm64 -o marblegame -I . -L /usr/local/lib/ -std=c11 marblegame.c /usr/local/lib/{ui.hdll,openal.hdll,fmt.hdll,sdl.hdll,uv.hdll,ssl.hdll} -lsdl2 -lhl -luv
-
+            cd ~/deps/datachannel
+            haxelib dev datachannel .
+            cd test/server
+            haxe build_hl.hxml
+            cd test/client
+            haxe build_hl.hxml
       # - store_artifacts:
       #     path: ~/MBHaxe/MBHaxe-Platinum-Mac.zip
 
