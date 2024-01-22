@@ -1,0 +1,19 @@
+{
+    "name": "datachannel",
+    "url": "https://github.com/RandomityGuy/hxdatachannel",
+    "license": "MIT",
+    "tags": [
+        "extern",
+        "externs",
+        "cross",
+        "native",
+        "js"
+    ],
+    "description": "WebRTC Datachannel bindings for Hashlink. Requires installation of Hashlink Extension",
+    "version": "1.0.1",
+    "classPath": "src/",
+    "releasenote": "Initial release.",
+    "contributors": [
+        "RandomityGuy"
+    ]
+}
