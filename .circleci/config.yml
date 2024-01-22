@@ -253,7 +253,7 @@ jobs:
             command: |
               mkdir ~/deps
               cd ~/deps
-              git clone https://github.com/RandomityGuy/hashlink
+              git clone --depth=1 https://github.com/HaxeFoundation/hashlink
               cd hashlink
               mv /tmp/include/sdl include/sdl
               mv /tmp/include/openal include/openal
@@ -269,60 +269,41 @@ jobs:
               export PATH=$nekopath:"$PATH"
               haxelib install hxWebSockets
               haxelib dev hashlink ~/deps/hashlink/other/haxelib
-              haxelib dev datachannel ~/datachannel
 
-  #       - run:
-  #           name: Compile MBHaxe
-  #           command: |
-  #             export PATH=/tmp/haxe/haxe:"$PATH"
-  #             export HAXE_STD_PATH=/tmp/haxe/haxe/std
-  #             nekopath=$(/bin/find /c/ProgramData/chocolatey/lib/neko -name neko.dll -printf '%h\n')
-  #             set NEKOPATH=$nekopath
-  #             export PATH=$nekopath:"$PATH"
-  #             cd ~/project
-  #             haxe compile-c.hxml
-  #             cd native
-  #             sed -i -e 's/MaxSpeed/Disabled/g' marblegame.vcxproj
-  #             sed -i -e 's/<FunctionLevelLinking>true<\/FunctionLevelLinking>//g' marblegame.vcxproj
-  #             sed -i -e 's/<IntrinsicFunctions>true<\/IntrinsicFunctions>//g' marblegame.vcxproj
-  #             sed -i -e 's/<EnableCOMDATFolding>true<\/EnableCOMDATFolding>//g' marblegame.vcxproj
-  #             sed -i -e 's/<OptimizeReferences>true<\/OptimizeReferences>//g' marblegame.vcxproj
-  #             sed -i -e 's/HL_MAKE;//g' marblegame.vcxproj
-  #             sed -i -e 's/<ClInclude Include=".*" \/>//g' marblegame.vcxproj
-  #             sed -i -e 's/<ClCompile Include=".*" \/>//g' marblegame.vcxproj
-  #             perl -0777 -i.marblegame.vcxproj -pe 's/<ItemGroup>[^.]*<\/ItemGroup>/<ItemGroup><ClCompile Include="marblegame.c" \/><\/ItemGroup>/g' marblegame.vcxproj
-  #             HASHLINKPATH=~/deps/hashlink
-  #             MSBuild.exe marblegame.sln -m -nologo -p:Configuration=Release -p:Platform=x64 -p:PlatformToolset=v142 -p:HASHLINK=$HASHLINKPATH
-  #       - run:
-  #           name: Package app bundle
-  #           command: |
-  #             cd ~/project
-  #             mkdir release
-  #             cd release
-  #             cp ../native/x64/Release/marblegame.exe .
-  #             mv marblegame.exe marbleblast.exe
-  #             cp -r ../data .
-  #             cp ~/deps/hashlink/x64/Release/libhl.dll .
-  #             cp ~/deps/hashlink/x64/Release/fmt.hdll .
-  #             cp ~/deps/hashlink/x64/Release/ui.hdll .
-  #             cp ~/deps/hashlink/x64/Release/openal.hdll .
-  #             cp ~/deps/hashlink/x64/Release/sdl.hdll .
-  #             cp ~/deps/hashlink/x64/Release/ssl.hdll .
-  #             cp ~/deps/hashlink/x64/Release/uv.hdll .
-  #             cp ~/deps/hashlink/include/sdl/lib/x64/SDL2.dll .
-  #             cp ~/deps/hashlink/include/openal/bin/Win64/soft_oal.dll ./OpenAL32.dll 
-  #       - run:
-  #           name: Zip bundle
-  #           command: |
-  #             cd ~/project
-  #             7z a MBHaxe-Platinum-Win.zip release/
+        - run: 
+            name: Build Extension
+            command: |
+              export PATH=/tmp/haxe/haxe:"$PATH"
+              export HAXE_STD_PATH=/tmp/haxe/haxe/std
+              nekopath=$(/bin/find /c/ProgramData/chocolatey/lib/neko -name neko.dll -printf '%h\n')
+              set NEKOPATH=$nekopath
+              export PATH=$nekopath:"$PATH"
+              choco install cmake -y
+              cd ~/project/cpp
+              "/c/Program Files/CMake/bin/cmake" -S. -Bbuild -DCMAKE_BUILD_TYPE=Release -DHASHLINK_LIBRARY_DIR="~/deps/hashlink/x64/Release" -DHASHLINK_INCLUDE_DIR="../../deps/hashlink/src"
+              "/c/Program Files/CMake/bin/cmake" --build build --config Release -j$NPROC
+              mv ~/project/cpp/build/Release/datachannel.hdll ~/deps/hashlink/x64/Release
+              haxelib dev datachannel ~/project
 
-  #       - run:
-  #           name: Upload to Artifact Storage
-  #           command: |
-  #             scp -o StrictHostKeyChecking=no -i $KEYPATH -P $PORT ~/project/MBHaxe-Platinum-Win.zip $REMOTEDIR/MBHaxe-Platinum-Win.zip
-        # - store_artifacts:
-        #     path: ~/project/MBHaxe-Platinum-Win.zip
+        - run: 
+            name: Test Extension
+            command: |
+              export PATH=/tmp/haxe/haxe:"$PATH"
+              export PATH=~/deps/hashlink/x64/Release:"$PATH"
+              export HAXE_STD_PATH=/tmp/haxe/haxe/std
+              set NEKOPATH=$nekopath
+              export PATH=$nekopath:"$PATH"
+              cd ~/project/test/server
+              haxe build_hl.hxml
+              hl bin/main.hl &
+              cd ../client
+              haxe build_hl.hxml
+              hl bin/main.hl > test_results.txt
+              if grep -q passed test_results.txt; then
+                exit 0
+              else
+                exit 1
+              fi
 
 
 # Invoke jobs via workflows
