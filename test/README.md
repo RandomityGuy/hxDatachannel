@@ -1,0 +1,2 @@
+# Tests
+Tests are based on [WebRTC Echoes Datachannel Test](https://github.com/sipsorcery/webrtc-echoes/blob/master/doc/DataChannelEchoTestSpecification.md) but utilizes [WebSocket](https://github.com/ianharrigan/hxWebSockets) signalling
