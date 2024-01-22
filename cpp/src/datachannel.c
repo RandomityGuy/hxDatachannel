@@ -88,6 +88,11 @@ datachannel_callback* datachannel_callback_alloc()
 
 void hl_rtc_peerconnection_finalize(hl_rtc_peerconnection* pc)
 {
+    rtcSetLocalCandidateCallback(pc->pc, NULL);
+    rtcSetLocalDescriptionCallback(pc->pc, NULL);
+    rtcSetLocalCandidateCallback(pc->pc, NULL);
+    rtcSetStateChangeCallback(pc->pc, NULL);
+    rtcSetGatheringStateChangeCallback(pc->pc, NULL);
     rtcDeletePeerConnection(pc->pc);
     hl_remove_root(&pc->candidateCb);
     hl_remove_root(&pc->datachannelCb);
@@ -98,6 +103,11 @@ void hl_rtc_peerconnection_finalize(hl_rtc_peerconnection* pc)
 
 void hl_rtc_datachannel_finalize(hl_rtc_datachannel* dc)
 {
+    rtcSetOpenCallback(dc->dc, NULL);
+    rtcSetClosedCallback(dc->dc, NULL);
+    rtcSetErrorCallback(dc->dc, NULL);
+    rtcSetMessageCallback(dc->dc, NULL);
+    rtcSetBufferedAmountLowCallback(dc->dc, NULL);
     rtcDeleteDataChannel(dc->dc);
     hl_remove_root(&dc->bufferLowCb);
     hl_remove_root(&dc->closedCb);

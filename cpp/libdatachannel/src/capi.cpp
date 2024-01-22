@@ -25,6 +25,7 @@ using std::chrono::milliseconds;
 
 namespace {
 
+std::unordered_map<int, void*> userPointerMap;
 std::unordered_map<int, shared_ptr<PeerConnection>> peerConnectionMap;
 std::unordered_map<int, shared_ptr<DataChannel>> dataChannelMap;
 std::unordered_map<int, shared_ptr<Track>> trackMap;
@@ -36,7 +37,6 @@ std::unordered_map<int, shared_ptr<RtpPacketizationConfig>> rtpConfigMap;
 std::unordered_map<int, shared_ptr<WebSocket>> webSocketMap;
 std::unordered_map<int, shared_ptr<WebSocketServer>> webSocketServerMap;
 #endif
-std::unordered_map<int, void *> userPointerMap;
 std::mutex mutex;
 int lastId = 0;
 

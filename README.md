@@ -1,10 +1,10 @@
-# HxDataChannel
+# HxDatachannel
 WebRTC DataChannel Bindings for Hashlink and JS (Browser)  
 It makes use of [libdatachannel](https://github.com/paullouisageneau/libdatachannel) to provide WebRTC DataChannels for Hashlink.
 
 # Build
 Set the env/CMake vars HASHLINK_INCLUDE_DIR and HASHLINK_LIBRARY_DIR to Hashlink src and libhl directories respectively.  
-Then build the native extension using CMake.
+Then build the native extension using CMake. See the ./circleci/config.yml for working build configuration.
 
 # Usage
 The API closely mimics the WebRTC Browser API at [MDN WebRTC API Docs](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API)
