@@ -253,7 +253,7 @@ jobs:
             command: |
               mkdir ~/deps
               cd ~/deps
-              git clone --depth=1 https://github.com/HaxeFoundation/hashlink
+              git clone https://github.com/RandomityGuy/hashlink
               cd hashlink
               mv /tmp/include/sdl include/sdl
               mv /tmp/include/openal include/openal
