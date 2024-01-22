@@ -299,7 +299,7 @@ jobs:
               hl bin/main.hl &
               cd ../client
               haxe build_hl.hxml
-              hl bin/main.hl > test_results.txt
+              /usr/bin/timeout 10 bash -c "hl bin/main.hl > test_results.txt"
               if grep -q passed test_results.txt; then
                 exit 0
               else
