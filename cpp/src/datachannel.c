@@ -407,7 +407,7 @@ HL_PRIM void HL_NAME(process_events)()
         args[0] = &pcarg;
 
         char buffer[256];
-        printf("handling callback: onDatachannel\n");
+        // printf("handling callback: onDatachannel\n");
         if (rtcGetDataChannelLabel(hldc->dc, buffer, 256) >= 0)
         {
             vdynamic arg;
