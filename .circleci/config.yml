@@ -189,10 +189,15 @@ jobs:
             haxelib dev datachannel .
             cd test/server
             haxe build_hl.hxml
-            cd test/client
+            hl bin/main.hl &
+            cd ../test/client
             haxe build_hl.hxml
-      # - store_artifacts:
-      #     path: ~/MBHaxe/MBHaxe-Platinum-Mac.zip
+            hl bin/main.hl > test_results.txt
+            if grep -q passed test_results.txt; then
+              exit 0
+            else
+              exit 1
+            fi
 
   build-win:
     executor: 
