@@ -273,6 +273,7 @@ HL_PRIM hl_rtc_datachannel* HL_NAME(create_datachannel_ex)(hl_rtc_peerconnection
     char* namestr = hl_to_utf8(name->bytes);
     rtcDataChannelInit dcInit;
     memset(&dcInit, 0, sizeof(rtcDataChannelInit));
+    dcInit.reliability.unreliable = maxLifetime != 0 || maxRetransmits != 0;
     dcInit.reliability.unordered = unordered;
     dcInit.reliability.maxPacketLifeTime = maxLifetime;
     dcInit.reliability.maxRetransmits = maxRetransmits;

@@ -49,13 +49,13 @@ class RTCPeerConnection {
 	public dynamic function onLocalCandidate(candidate:String) {}
 
 	// Called when the state of the connection changes
-	public dynamic function onStateChange(state:RTCState) {}
+	public dynamic function onStateChange(state:datachannel.RTCState):Void {}
 
 	// Called when the gathering state of the connection changes
-	public dynamic function onGatheringStateChange(state:RTCGatheringState) {}
+	public dynamic function onGatheringStateChange(state:datachannel.RTCGatheringState):Void {}
 
 	// Called when a data channel that is created by remote is opened
-	public dynamic function onDataChannel(dc:RTCDataChannel) {}
+	public dynamic function onDataChannel(dc:datachannel.RTCDataChannel):Void {}
 
 	public function new(iceServers:Array<String>, bindAddress:String) {
 		if (!RTC.inited)
@@ -192,10 +192,11 @@ class RTCPeerConnection {
 	// Creates a new data channel with specified options
 	public function createDatachannelWithOptions(label:String, unordered:Bool, maxRetransmits:Int, maxLifetime:Int) {
 		var dc:RTCDataChannel = null;
+		var reliable = maxRetransmits == 0 && maxLifetime == 0;
 		dc = new RTCDataChannel(inner.createDataChannel(label, {
 			ordered: !unordered,
-			maxRetransmits: maxRetransmits,
-			maxPacketLifeTime: maxLifetime,
+			maxRetransmits: reliable ? null : maxRetransmits,
+			maxPacketLifeTime: reliable ? null : maxLifetime,
 		}), this);
 		this.dataChannels.push(dc);
 		if (!this._sdpGenerated) {

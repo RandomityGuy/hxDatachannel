@@ -7,12 +7,13 @@
         "externs",
         "cross",
         "native",
-        "js"
+        "js",
+        "webrtc"
     ],
     "description": "WebRTC Datachannel bindings for Hashlink. Requires installation of Hashlink Extension",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "classPath": "src/",
-    "releasenote": "Initial release.",
+    "releasenote": "Fixed unreliable datachannels",
     "contributors": [
         "RandomityGuy"
     ]
