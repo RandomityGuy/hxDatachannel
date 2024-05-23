@@ -14,7 +14,9 @@ After compilation, copy the built datachannel.hdll to the same folder as Hashlin
 - `haxelib install datachannel`
 
 # Usage
-The API closely mimics the WebRTC Browser API at [MDN WebRTC API Docs](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API). More documentation is available in the form of commented code.
+The API closely mimics the WebRTC Browser API at [MDN WebRTC API Docs](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API).
+TURN servers are specified in the syntax provided at [libdatachannel](https://libdatachannel.org/pages/reference.html).
+More documentation is available in the form of commented code.
 ```haxe
 import datachannel.*;
 
@@ -23,7 +25,7 @@ class Main {
         // Initialize the RTC extension
         RTC.init();
 
-        var iceServers = ["stun:stun.l.google.com:19302"];
+        var iceServers = ["stun:stun.l.google.com:19302", "turn:username:password@turn.myturnserver.org"];
 
         // Create the RTCPeerConnection
         var rtc = new RTCPeerConnection(iceServers, "0.0.0.0");
