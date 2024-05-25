@@ -146,9 +146,11 @@ class RTCPeerConnection {
 	}
 
 	// Creates a new data channel with specified options
-	public function createDatachannelWithOptions(label:String, unordered:Bool, maxRetransmits:Int, maxLifetime:Int) {
+	public function createDatachannelWithOptions(label:String, unordered:Bool, maxRetransmits:Null<Int>, maxLifetime:Null<Int>) {
 		var dc:RTCDataChannel = null;
-		dc = new RTCDataChannel(create_datachannel_ex(this.inner, label, unordered, maxRetransmits, maxLifetime), label, this, unordered,
+		var maxTransmits = maxRetransmits != null ? maxRetransmits : 0;
+		var maxLifetimeVar = maxLifetime != null ? maxLifetime : 0;
+		dc = new RTCDataChannel(create_datachannel_ex(this.inner, label, unordered, maxTransmits, maxLifetimeVar), label, this, unordered,
 			(maxRetransmits != 0 || maxLifetime != 0) ? Unreliable(maxRetransmits, maxLifetime) : Reliable);
 		this.dataChannels.push(dc);
 		return dc;

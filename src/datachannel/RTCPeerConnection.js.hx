@@ -152,6 +152,7 @@ class RTCPeerConnection {
 		this.remoteDescription = sdp;
 		this.remoteDescriptionType = type;
 		if (type == "offer" && !this._sdpGenerated) {
+			this._sdpGenerated = true;
 			inner.createAnswer().then(e -> {
 				localDescription = e.sdp;
 				localDescriptionType = switch (e.type) {
@@ -162,7 +163,6 @@ class RTCPeerConnection {
 					case _:
 						"offer";
 				};
-				this._sdpGenerated = true;
 				inner.setLocalDescription(e);
 				onLocalDescription(e.sdp, localDescriptionType);
 			});
@@ -184,6 +184,7 @@ class RTCPeerConnection {
 		dc = new RTCDataChannel(inner.createDataChannel(label), this);
 		this.dataChannels.push(dc);
 		if (!this._sdpGenerated) {
+			this._sdpGenerated = true;
 			inner.createOffer().then((sdp) -> {
 				localDescription = sdp.sdp;
 				localDescriptionType = switch (sdp.type) {
@@ -194,7 +195,6 @@ class RTCPeerConnection {
 					case _:
 						"offer";
 				};
-				this._sdpGenerated = true;
 				inner.setLocalDescription(sdp);
 				onLocalDescription(sdp.sdp, localDescriptionType);
 			});
@@ -203,16 +203,17 @@ class RTCPeerConnection {
 	}
 
 	// Creates a new data channel with specified options
-	public function createDatachannelWithOptions(label:String, unordered:Bool, maxRetransmits:Int, maxLifetime:Int) {
+	public function createDatachannelWithOptions(label:String, unordered:Bool, maxRetransmits:Null<Int>, maxLifetime:Null<Int>) {
 		var dc:RTCDataChannel = null;
 		var reliable = maxRetransmits == 0 && maxLifetime == 0;
 		dc = new RTCDataChannel(inner.createDataChannel(label, {
 			ordered: !unordered,
-			maxRetransmits: reliable ? null : maxRetransmits,
-			maxPacketLifeTime: reliable ? null : maxLifetime,
+			maxRetransmits: reliable ? js.Syntax.code("undefined") : (maxRetransmits != null ? maxRetransmits : js.Syntax.code("undefined")),
+			maxPacketLifeTime: reliable ? js.Syntax.code("undefined") : (maxLifetime != null ? maxLifetime : js.Syntax.code("undefined")),
 		}), this);
 		this.dataChannels.push(dc);
 		if (!this._sdpGenerated) {
+			this._sdpGenerated = true;
 			inner.createOffer().then((sdp) -> {
 				localDescription = sdp.sdp;
 				localDescriptionType = switch (sdp.type) {
@@ -223,7 +224,6 @@ class RTCPeerConnection {
 					case _:
 						"offer";
 				};
-				this._sdpGenerated = true;
 				inner.setLocalDescription(sdp);
 				onLocalDescription(sdp.sdp, localDescriptionType);
 			});

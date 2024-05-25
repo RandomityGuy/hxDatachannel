@@ -99,7 +99,7 @@ class RTCPeerConnection {
 	}
 
 	// Creates a new data channel with specified options
-	public function createDatachannelWithOptions(label:String, unordered:Bool, maxRetransmits:Int, maxLifetime:Int):RTCDataChannel {
+	public function createDatachannelWithOptions(label:String, unordered:Bool, maxRetransmits:Null<Int>, maxLifetime:Null<Int>):RTCDataChannel {
 		return null;
 	}
 
