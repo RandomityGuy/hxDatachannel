@@ -60,25 +60,12 @@ class RTCPeerConnection {
 	public function new(iceServers:Array<String>, bindAddress:String) {
 		if (!RTC.inited)
 			throw new RTCException("RTC is not initialized");
-		var properServers:Array<Dynamic> = [];
-		var authRe = ~/:(?:\/\/)?(\S*):(\S*)@/g;
-		for (server in iceServers) {
-			if (authRe.match(server)) {
-				var proto = server.substr(0, server.indexOf(":"));
-				var rest = server.substr(server.indexOf("@") + 1);
-				properServers.push({
-					urls: ['${proto}:${rest}'],
-					username: authRe.matched(1),
-					password: authRe.matched(2)
-				});
-			} else {
-				properServers.push({
-					urls: [server]
-				});
-			}
-		}
 		this.inner = new PeerConnection({
-			iceServers: properServers,
+			iceServers: [
+				{
+					urls: iceServers
+				}
+			],
 		});
 		this.iceServers = iceServers;
 		this.dataChannels = [];
