@@ -11,9 +11,9 @@
         "webrtc"
     ],
     "description": "WebRTC Datachannel bindings for Hashlink. Requires installation of Hashlink Extension",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "classPath": "src/",
-    "releasenote": "Added support for TURN server authentication. Fixed multiple datachannels on JS.",
+    "releasenote": "Various bug fixes.",
     "contributors": [
         "RandomityGuy"
     ]

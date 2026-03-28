@@ -90,9 +90,9 @@ void hl_rtc_peerconnection_finalize(hl_rtc_peerconnection* pc)
 {
     rtcSetLocalCandidateCallback(pc->pc, NULL);
     rtcSetLocalDescriptionCallback(pc->pc, NULL);
-    rtcSetLocalCandidateCallback(pc->pc, NULL);
     rtcSetStateChangeCallback(pc->pc, NULL);
     rtcSetGatheringStateChangeCallback(pc->pc, NULL);
+    rtcSetDataChannelCallback(pc->pc, NULL);
     rtcDeletePeerConnection(pc->pc);
     hl_remove_root(&pc->candidateCb);
     hl_remove_root(&pc->datachannelCb);
@@ -127,6 +127,30 @@ static void RTC_API messageCallback(int id, const char* message, int size, void*
 static void RTC_API bufferedAmountLowCallback(int id, void* ptr);
 static void RTC_API dataChannelCallback(int pc, int dc, void* ptr);
 
+hl_rtc_datachannel* hl_rtc_make_datachannel(int dc)
+{
+    hl_rtc_datachannel* hldc = (hl_rtc_datachannel*)hl_gc_alloc_finalizer(sizeof(hl_rtc_datachannel));
+    hldc->finalize = hl_rtc_datachannel_finalize;
+    hldc->dc = dc;
+    hldc->openCb = NULL;
+    hldc->closedCb = NULL;
+    hldc->errCb = NULL;
+    hldc->msgCb = NULL;
+    hldc->bufferLowCb = NULL;
+    hl_add_root(&hldc->bufferLowCb);
+    hl_add_root(&hldc->closedCb);
+    hl_add_root(&hldc->errCb);
+    hl_add_root(&hldc->msgCb);
+    hl_add_root(&hldc->openCb);
+    rtcSetUserPointer(dc, hldc); // It gets messed up so we need to re-set it
+    rtcSetOpenCallback(dc, openCallback);
+    rtcSetClosedCallback(dc, closedCallback);
+    rtcSetErrorCallback(dc, errorCallback);
+    rtcSetMessageCallback(dc, messageCallback);
+    rtcSetBufferedAmountLowCallback(dc, bufferedAmountLowCallback);
+    return hldc;
+}
+
 #define _TPC _ABSTRACT(hl_rtc_peerconnection)
 #define _TDC _ABSTRACT(hl_rtc_datachannel)
 
@@ -157,7 +181,7 @@ HL_PRIM void HL_NAME(finalize)()
     {
         hl_remove_root(&callback_result_mutex);
         hl_mutex_free(callback_result_mutex);
-        callback_result_mutex = 0;
+        callback_result_mutex = NULL;
     }
 
     if (callback_result_semaphore != NULL)
@@ -246,26 +270,7 @@ HL_PRIM hl_rtc_datachannel* HL_NAME(create_datachannel)(hl_rtc_peerconnection* p
 {
     char* namestr = hl_to_utf8(name->bytes);
     int dc = rtcCreateDataChannel(pc->pc, namestr);
-    hl_rtc_datachannel* hldc = (hl_rtc_datachannel*)hl_gc_alloc_finalizer(sizeof(hl_rtc_datachannel));
-    hldc->finalize = hl_rtc_datachannel_finalize;
-    hldc->dc = dc;
-    hldc->openCb = NULL;
-    hldc->closedCb = NULL;
-    hldc->errCb = NULL;
-    hldc->msgCb = NULL;
-    hldc->bufferLowCb = NULL;
-    hl_add_root(&hldc->bufferLowCb);
-    hl_add_root(&hldc->closedCb);
-    hl_add_root(&hldc->errCb);
-    hl_add_root(&hldc->msgCb);
-    hl_add_root(&hldc->openCb);
-    rtcSetUserPointer(dc, hldc); // It gets messed up so we need to re-set it
-    rtcSetOpenCallback(dc, openCallback);
-    rtcSetClosedCallback(dc, closedCallback);
-    rtcSetErrorCallback(dc, errorCallback);
-    rtcSetMessageCallback(dc, messageCallback);
-    rtcSetBufferedAmountLowCallback(dc, bufferedAmountLowCallback);
-    return hldc;
+    return hl_rtc_make_datachannel(dc);
 }
 
 HL_PRIM hl_rtc_datachannel* HL_NAME(create_datachannel_ex)(hl_rtc_peerconnection* pc, vstring* name, bool unordered, int maxRetransmits, int maxLifetime)
@@ -278,26 +283,7 @@ HL_PRIM hl_rtc_datachannel* HL_NAME(create_datachannel_ex)(hl_rtc_peerconnection
     dcInit.reliability.maxPacketLifeTime = maxLifetime;
     dcInit.reliability.maxRetransmits = maxRetransmits;
     int dc = rtcCreateDataChannelEx(pc->pc, namestr, &dcInit);
-    hl_rtc_datachannel* hldc = (hl_rtc_datachannel*)hl_gc_alloc_finalizer(sizeof(hl_rtc_datachannel));
-    hldc->finalize = hl_rtc_datachannel_finalize;
-    hldc->dc = dc;
-    hldc->openCb = NULL;
-    hldc->closedCb = NULL;
-    hldc->errCb = NULL;
-    hldc->msgCb = NULL;
-    hldc->bufferLowCb = NULL;
-    hl_add_root(&hldc->bufferLowCb);
-    hl_add_root(&hldc->closedCb);
-    hl_add_root(&hldc->errCb);
-    hl_add_root(&hldc->msgCb);
-    hl_add_root(&hldc->openCb);
-    rtcSetUserPointer(dc, hldc); // It gets messed up so we need to re-set it
-    rtcSetOpenCallback(dc, openCallback);
-    rtcSetClosedCallback(dc, closedCallback);
-    rtcSetErrorCallback(dc, errorCallback);
-    rtcSetMessageCallback(dc, messageCallback);
-    rtcSetBufferedAmountLowCallback(dc, bufferedAmountLowCallback);
-    return hldc;
+    return hl_rtc_make_datachannel(dc);
 }
 
 HL_PRIM void HL_NAME(set_peerconnection_datachannel_cb)(hl_rtc_peerconnection* pc, vclosure* openCb)
@@ -381,25 +367,7 @@ HL_PRIM void HL_NAME(process_events)()
         datachannel_callback* res = datachannel_callbacks;
 
         hl_mutex_acquire(callback_result_mutex);
-        hl_rtc_datachannel* hldc = (hl_rtc_datachannel*)hl_gc_alloc_finalizer(sizeof(hl_rtc_datachannel));
-        hldc->finalize = hl_rtc_datachannel_finalize;
-        hldc->dc = res->dc;
-        hldc->openCb = NULL;
-        hldc->closedCb = NULL;
-        hldc->errCb = NULL;
-        hldc->msgCb = NULL;
-        hldc->bufferLowCb = NULL;
-        hl_add_root(&hldc->bufferLowCb);
-        hl_add_root(&hldc->closedCb);
-        hl_add_root(&hldc->errCb);
-        hl_add_root(&hldc->msgCb);
-        hl_add_root(&hldc->openCb);
-        rtcSetUserPointer(res->dc, hldc); // It gets messed up so we need to re-set it
-        rtcSetOpenCallback(res->dc, openCallback);
-        rtcSetClosedCallback(res->dc, closedCallback);
-        rtcSetErrorCallback(res->dc, errorCallback);
-        rtcSetMessageCallback(res->dc, messageCallback);
-        rtcSetBufferedAmountLowCallback(res->dc, bufferedAmountLowCallback);
+        hl_rtc_datachannel* hldc = hl_rtc_make_datachannel(res->dc);
 
         vdynamic* args[2];
         vdynamic pcarg;
@@ -643,6 +611,7 @@ static void RTC_API errorCallback(int id, const char* error, void* ptr)
     res->arg1.t = &hlt_bytes;
     res->arg1.v.bytes = (vbyte*)malloc(errorlen + 1);
     memcpy(res->arg1.v.bytes, error, errorlen);
+    res->arg1.v.bytes[errorlen] = '\0';
     res->arg1Size = errorlen + 1;
     res->closure = &hldc->errCb;
     res->args = 1;
@@ -662,7 +631,7 @@ static void RTC_API messageCallback(int id, const char* message, int size, void*
         hl_mutex_acquire(callback_result_mutex);
         callback_result* res = callback_result_alloc();
         res->arg1.t = &hlt_bytes;
-        res->arg1.v.bytes = (vbyte*)malloc(len);
+        res->arg1.v.bytes = (vbyte*)malloc(len + 1);
         memcpy(res->arg1.v.bytes, message, len);
         res->arg1.v.bytes[len] = '\0';
         res->arg1Size = len + 1;
