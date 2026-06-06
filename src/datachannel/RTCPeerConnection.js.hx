@@ -77,11 +77,11 @@ class RTCPeerConnection {
 					credential: credParts[1]
 				});
 			} else {
-				properServers.push({urls: [server]});
+				properServers.push({urls: server});
 			}
 		}
 
-		this.inner = new PeerConnection({
+		this.inner = untyped new PeerConnection({
 			iceServers: properServers,
 		});
 		this.iceServers = iceServers;
