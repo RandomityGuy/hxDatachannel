@@ -15,29 +15,33 @@
  */
 /*
  *  Copyright The Mbed TLS Contributors
- *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ *  SPDX-License-Identifier: Apache-2.0
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may
+ *  not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 
 #ifndef PSA_CRYPTO_TYPES_H
 #define PSA_CRYPTO_TYPES_H
-
-/*
- * Include the build-time configuration information header. Here, we do not
- * include `"mbedtls/build_info.h"` directly but `"psa/build_info.h"`, which
- * is basically just an alias to it. This is to ease the maintenance of the
- * TF-PSA-Crypto repository which has a different build system and
- * configuration.
- */
-#include "psa/build_info.h"
-
-/* Define the MBEDTLS_PRIVATE macro. */
 #include "mbedtls/private_access.h"
 
-#if defined(MBEDTLS_PSA_CRYPTO_PLATFORM_FILE)
-#include MBEDTLS_PSA_CRYPTO_PLATFORM_FILE
-#else
 #include "crypto_platform.h"
-#endif
+
+/* If MBEDTLS_PSA_CRYPTO_C is defined, make sure MBEDTLS_PSA_CRYPTO_CLIENT
+ * is defined as well to include all PSA code.
+ */
+#if defined(MBEDTLS_PSA_CRYPTO_C)
+#define MBEDTLS_PSA_CRYPTO_CLIENT
+#endif /* MBEDTLS_PSA_CRYPTO_C */
 
 #include <stdint.h>
 
@@ -66,21 +70,10 @@ typedef int32_t psa_status_t;
  */
 
 /** \brief Encoding of a key type.
- *
- * Values of this type are generally constructed by macros called
- * `PSA_KEY_TYPE_xxx`.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
  */
 typedef uint16_t psa_key_type_t;
 
 /** The type of PSA elliptic curve family identifiers.
- *
- * Values of this type are generally constructed by macros called
- * `PSA_ECC_FAMILY_xxx`.
  *
  * The curve identifier is required to create an ECC key using the
  * PSA_KEY_TYPE_ECC_KEY_PAIR() or PSA_KEY_TYPE_ECC_PUBLIC_KEY()
@@ -88,48 +81,27 @@ typedef uint16_t psa_key_type_t;
  *
  * Values defined by this standard will never be in the range 0x80-0xff.
  * Vendors who define additional families must use an encoding in this range.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
  */
 typedef uint8_t psa_ecc_family_t;
 
 /** The type of PSA Diffie-Hellman group family identifiers.
  *
- * Values of this type are generally constructed by macros called
- * `PSA_DH_FAMILY_xxx`.
- *
- * The group identifier is required to create a Diffie-Hellman key using the
+ * The group identifier is required to create an Diffie-Hellman key using the
  * PSA_KEY_TYPE_DH_KEY_PAIR() or PSA_KEY_TYPE_DH_PUBLIC_KEY()
  * macros.
  *
  * Values defined by this standard will never be in the range 0x80-0xff.
  * Vendors who define additional families must use an encoding in this range.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
  */
 typedef uint8_t psa_dh_family_t;
 
 /** \brief Encoding of a cryptographic algorithm.
- *
- * Values of this type are generally constructed by macros called
- * `PSA_ALG_xxx`.
  *
  * For algorithms that can be applied to multiple key types, this type
  * does not encode the key type. For example, for symmetric ciphers
  * based on a block cipher, #psa_algorithm_t encodes the block cipher
  * mode and the padding mode while the block cipher itself is encoded
  * via #psa_key_type_t.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
  */
 typedef uint32_t psa_algorithm_t;
 
@@ -171,14 +143,6 @@ typedef uint32_t psa_algorithm_t;
  * #PSA_KEY_LIFETIME_PERSISTENT is supported if persistent storage is
  * available. Other lifetime values may be supported depending on the
  * library configuration.
- *
- * Values of this type are generally constructed by macros called
- * `PSA_KEY_LIFETIME_xxx`.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
  */
 typedef uint32_t psa_key_lifetime_t;
 
@@ -210,11 +174,6 @@ typedef uint32_t psa_key_lifetime_t;
  * \note Key persistence levels are 8-bit values. Key management
  *       interfaces operate on lifetimes (type ::psa_key_lifetime_t) which
  *       encode the persistence as the lower 8 bits of a 32-bit value.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
  */
 typedef uint8_t psa_key_persistence_t;
 
@@ -251,11 +210,6 @@ typedef uint8_t psa_key_persistence_t;
  * \note Key location indicators are 24-bit values. Key management
  *       interfaces operate on lifetimes (type ::psa_key_lifetime_t) which
  *       encode the location as the upper 24 bits of a 32-bit value.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
  */
 typedef uint32_t psa_key_location_t;
 
@@ -267,37 +221,20 @@ typedef uint32_t psa_key_location_t;
  *   #PSA_KEY_ID_VENDOR_MIN to #PSA_KEY_ID_VENDOR_MAX.
  * - 0 is reserved as an invalid key identifier.
  * - Key identifiers outside these ranges are reserved for future use.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to how values are allocated must require careful
- *       consideration to allow backward compatibility.
  */
 typedef uint32_t psa_key_id_t;
 
-/** Encoding of key identifiers as seen inside the PSA Crypto implementation.
- *
- * When PSA Crypto is built as a library inside an application, this type
- * is identical to #psa_key_id_t. When PSA Crypto is built as a service
- * that can store keys on behalf of multiple clients, this type
- * encodes the #psa_key_id_t value seen by each client application as
- * well as extra information that identifies the client that owns
- * the key.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
- */
 #if !defined(MBEDTLS_PSA_CRYPTO_KEY_ID_ENCODES_OWNER)
 typedef psa_key_id_t mbedtls_svc_key_id_t;
 
 #else /* MBEDTLS_PSA_CRYPTO_KEY_ID_ENCODES_OWNER */
-/* Implementation-specific: The Mbed TLS library can be built as
- * part of a multi-client service that exposes the PSA Cryptography API in each
+/* Implementation-specific: The Mbed Cryptography library can be built as
+ * part of a multi-client service that exposes the PSA Cryptograpy API in each
  * client and encodes the client identity in the key identifier argument of
  * functions such as psa_open_key().
  */
-typedef struct {
+typedef struct
+{
     psa_key_id_t MBEDTLS_PRIVATE(key_id);
     mbedtls_key_owner_id_t MBEDTLS_PRIVATE(owner);
 } mbedtls_svc_key_id_t;
@@ -310,16 +247,7 @@ typedef struct {
  * @{
  */
 
-/** \brief Encoding of permitted usage on a key.
- *
- * Values of this type are generally constructed as bitwise-ors of macros
- * called `PSA_KEY_USAGE_xxx`.
- *
- * \note Values of this type are encoded in the persistent key store.
- *       Any changes to existing values will require bumping the storage
- *       format version and providing a translation when reading the old
- *       format.
- */
+/** \brief Encoding of permitted usage on a key. */
 typedef uint32_t psa_key_usage_t;
 
 /**@}*/
@@ -434,7 +362,7 @@ typedef struct psa_key_attributes_s psa_key_attributes_t;
 
 #ifndef __DOXYGEN_ONLY__
 #if defined(MBEDTLS_PSA_CRYPTO_SE_C)
-/* Mbed TLS defines this type in crypto_types.h because it is also
+/* Mbed Crypto defines this type in crypto_types.h because it is also
  * visible to applications through an implementation-specific extension.
  * For the PSA Cryptography specification, this type is only visible
  * via crypto_se_driver.h. */
@@ -448,60 +376,8 @@ typedef uint64_t psa_key_slot_number_t;
  * @{
  */
 
-/** \brief Encoding of the step of a key derivation.
- *
- * Values of this type are generally constructed by macros called
- * `PSA_KEY_DERIVATION_INPUT_xxx`.
- */
+/** \brief Encoding of the step of a key derivation. */
 typedef uint16_t psa_key_derivation_step_t;
-
-/** \brief Custom parameters for key generation or key derivation.
- *
- * This is a structure type with at least the following field:
- *
- * - \c flags: an unsigned integer type. 0 for the default production parameters.
- *
- * Functions that take such a structure as input also take an associated
- * input buffer \c custom_data of length \c custom_data_length.
- *
- * The interpretation of this structure and the associated \c custom_data
- * parameter depend on the type of the created key.
- *
- * - #PSA_KEY_TYPE_RSA_KEY_PAIR:
- *     - \c flags: must be 0.
- *     - \c custom_data: the public exponent, in little-endian order.
- *       This must be an odd integer and must not be 1.
- *       Implementations must support 65537, should support 3 and may
- *       support other values.
- *       When not using a driver, Mbed TLS supports values up to \c INT_MAX.
- *       If this is empty, the default value 65537 is used.
- * - Other key types: reserved for future use. \c flags must be 0.
- */
-typedef struct psa_custom_key_parameters_s psa_custom_key_parameters_t;
-
-/** \brief Custom parameters for key generation or key derivation.
- *
- * This is a structure type with at least the following fields:
- *
- * - \c flags: an unsigned integer type. 0 for the default production parameters.
- * - \c data: a flexible array of bytes.
- *
- * The interpretation of this structure depend on the type of the
- * created key.
- *
- * - #PSA_KEY_TYPE_RSA_KEY_PAIR:
- *     - \c flags: must be 0.
- *     - \c data: the public exponent, in little-endian order.
- *       This must be an odd integer and must not be 1.
- *       Implementations must support 65537, should support 3 and may
- *       support other values.
- *       When not using a driver, Mbed TLS supports values up to \c INT_MAX.
- *       If this is empty or if the custom production parameters are omitted
- *       altogether, the default value 65537 is used.
- * - Other key types: reserved for future use. \c flags must be 0.
- *
- */
-typedef struct psa_key_production_parameters_s psa_key_production_parameters_t;
 
 /**@}*/
 

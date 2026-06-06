@@ -5,7 +5,19 @@
  */
 /*
  *  Copyright The Mbed TLS Contributors
- *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
+ *  SPDX-License-Identifier: Apache-2.0
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may
+ *  not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ *  WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 #ifndef MBEDTLS_ERROR_H
 #define MBEDTLS_ERROR_H
@@ -13,6 +25,11 @@
 #include "mbedtls/build_info.h"
 
 #include <stddef.h>
+
+#if ( defined(__ARMCC_VERSION) || defined(_MSC_VER) ) && \
+    !defined(inline) && !defined(__cplusplus)
+#define inline __inline
+#endif
 
 /**
  * Error code layout.
@@ -39,7 +56,7 @@
  * Module   Nr  Codes assigned
  * ERROR     2  0x006E          0x0001
  * MPI       7  0x0002-0x0010
- * GCM       3  0x0012-0x0016   0x0013-0x0013
+ * GCM       3  0x0012-0x0014   0x0013-0x0013
  * THREADING 3  0x001A-0x001E
  * AES       5  0x0020-0x0022   0x0021-0x0025
  * CAMELLIA  3  0x0024-0x0026   0x0027-0x0027
@@ -61,12 +78,10 @@
  * SHA1      1                  0x0035-0x0035 0x0073-0x0073
  * SHA256    1                  0x0037-0x0037 0x0074-0x0074
  * SHA512    1                  0x0039-0x0039 0x0075-0x0075
- * SHA-3     1                  0x0076-0x0076
  * CHACHA20  3                  0x0051-0x0055
  * POLY1305  3                  0x0057-0x005B
  * CHACHAPOLY 2 0x0054-0x0056
  * PLATFORM  2  0x0070-0x0072
- * LMS       5  0x0011-0x0019
  *
  * High-level module nr (3 bits - 0x0...-0x7...)
  * Name      ID  Nr of Errors
@@ -80,8 +95,7 @@
  * ECP       4   10 (Started from top)
  * MD        5   5
  * HKDF      5   1 (Started from top)
- * PKCS7     5   12 (Started from 0x5300)
- * SSL       5   3 (Started from 0x5F00)
+ * SSL       5   2 (Started from 0x5F00)
  * CIPHER    6   8 (Started from 0x6080)
  * SSL       6   22 (Started from top, plus 0x6000)
  * SSL       7   20 (Started from 0x7000, gaps at
@@ -94,15 +108,11 @@
 extern "C" {
 #endif
 
-/** Generic error */
-#define MBEDTLS_ERR_ERROR_GENERIC_ERROR       -0x0001
-/** This is a bug in the library */
-#define MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED -0x006E
+#define MBEDTLS_ERR_ERROR_GENERIC_ERROR       -0x0001  /**< Generic error */
+#define MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED -0x006E  /**< This is a bug in the library */
 
-/** Hardware accelerator failed */
-#define MBEDTLS_ERR_PLATFORM_HW_ACCEL_FAILED     -0x0070
-/** The requested feature is not supported by the platform */
-#define MBEDTLS_ERR_PLATFORM_FEATURE_UNSUPPORTED -0x0072
+#define MBEDTLS_ERR_PLATFORM_HW_ACCEL_FAILED     -0x0070 /**< Hardware accelerator failed */
+#define MBEDTLS_ERR_PLATFORM_FEATURE_UNSUPPORTED -0x0072 /**< The requested feature is not supported by the platform */
 
 /**
  * \brief Combines a high-level and low-level error code together.
@@ -110,15 +120,15 @@ extern "C" {
  *        Wrapper macro for mbedtls_error_add(). See that function for
  *        more details.
  */
-#define MBEDTLS_ERROR_ADD(high, low) \
-    mbedtls_error_add(high, low, __FILE__, __LINE__)
+#define MBEDTLS_ERROR_ADD( high, low ) \
+        mbedtls_error_add( high, low, __FILE__, __LINE__ )
 
 #if defined(MBEDTLS_TEST_HOOKS)
 /**
  * \brief Testing hook called before adding/combining two error codes together.
  *        Only used when invasive testing is enabled via MBEDTLS_TEST_HOOKS.
  */
-extern void (*mbedtls_test_hook_error_add)(int, int, const char *, int);
+extern void (*mbedtls_test_hook_error_add)( int, int, const char *, int );
 #endif
 
 /**
@@ -139,30 +149,29 @@ extern void (*mbedtls_test_hook_error_add)(int, int, const char *, int);
  * \param file      file where this error code addition occurred.
  * \param line      line where this error code addition occurred.
  */
-static inline int mbedtls_error_add(int high, int low,
-                                    const char *file, int line)
+static inline int mbedtls_error_add( int high, int low,
+                                     const char *file, int line )
 {
 #if defined(MBEDTLS_TEST_HOOKS)
-    if (*mbedtls_test_hook_error_add != NULL) {
-        (*mbedtls_test_hook_error_add)(high, low, file, line);
-    }
+    if( *mbedtls_test_hook_error_add != NULL )
+        ( *mbedtls_test_hook_error_add )( high, low, file, line );
 #endif
-    (void) file;
-    (void) line;
+    (void)file;
+    (void)line;
 
-    return high + low;
+    return( high + low );
 }
 
 /**
- * \brief Translate an Mbed TLS error code into a string representation.
- *        The result is truncated if necessary and always includes a
- *        terminating null byte.
+ * \brief Translate a mbed TLS error code into a string representation,
+ *        Result is truncated if necessary and always includes a terminating
+ *        null byte.
  *
  * \param errnum    error code
  * \param buffer    buffer to place representation in
  * \param buflen    length of the buffer
  */
-void mbedtls_strerror(int errnum, char *buffer, size_t buflen);
+void mbedtls_strerror( int errnum, char *buffer, size_t buflen );
 
 /**
  * \brief Translate the high-level part of an Mbed TLS error code into a string
@@ -177,7 +186,7 @@ void mbedtls_strerror(int errnum, char *buffer, size_t buflen);
  * \return The string representation of the error code, or \c NULL if the error
  *         code is unknown.
  */
-const char *mbedtls_high_level_strerr(int error_code);
+const char * mbedtls_high_level_strerr( int error_code );
 
 /**
  * \brief Translate the low-level part of an Mbed TLS error code into a string
@@ -192,7 +201,7 @@ const char *mbedtls_high_level_strerr(int error_code);
  * \return The string representation of the error code, or \c NULL if the error
  *         code is unknown.
  */
-const char *mbedtls_low_level_strerr(int error_code);
+const char * mbedtls_low_level_strerr( int error_code );
 
 #ifdef __cplusplus
 }

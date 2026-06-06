@@ -96,7 +96,7 @@ int mbedtls_everest_make_params( mbedtls_ecdh_context_everest *ctx, size_t *olen
                                  void *p_rng );
 
 /**
- * \brief           This function parses and processes a TLS ServerKeyExchange
+ * \brief           This function parses and processes a TLS ServerKeyExhange
  *                  payload.
  *
  *                  This is the first function used by a TLS client for ECDHE
@@ -116,7 +116,7 @@ int mbedtls_everest_read_params( mbedtls_ecdh_context_everest *ctx,
                                  const unsigned char **buf, const unsigned char *end );
 
 /**
- * \brief           This function parses and processes a TLS ServerKeyExchange
+ * \brief           This function parses and processes a TLS ServerKeyExhange
  *                  payload.
  *
  *                  This is the first function used by a TLS client for ECDHE
