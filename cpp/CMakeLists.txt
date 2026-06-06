@@ -34,4 +34,4 @@ install(
 
 target_include_directories(hxdatachannel.hdll PRIVATE ${HASHLINK_INCLUDE_DIR})
 target_link_directories(hxdatachannel.hdll PRIVATE ${HASHLINK_LIBRARY_DIR})
-target_link_libraries(hxdatachannel.hdll hl datachannel-static)
+target_link_libraries(hxdatachannel.hdll libhl datachannel-static)
