@@ -18,13 +18,23 @@ set (SRC_FILES
 	"src/datachannel.c"
 )
 
-add_library(hxdatachannel.hdll SHARED ${SRC_FILES})
-set_target_properties(hxdatachannel.hdll
-    PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME datachannel
-    SUFFIX .hdll
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_library(hxdatachannel.hdll STATIC ${SRC_FILES})
+    set_target_properties(hxdatachannel.hdll
+        PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME datachannel
+        SUFFIX .hdll.a
 )
+else()
+    add_library(hxdatachannel.hdll SHARED ${SRC_FILES})
+    set_target_properties(hxdatachannel.hdll
+        PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME datachannel
+        SUFFIX .hdll
+    )
+endif()
 
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY true) 
 install(
