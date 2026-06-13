@@ -30,14 +30,24 @@ using std::chrono::system_clock;
 
 WsHandshake::WsHandshake() {}
 
-WsHandshake::WsHandshake(string host, string path, std::vector<string> protocols)
-    : mHost(std::move(host)), mPath(std::move(path)), mProtocols(std::move(protocols)) {
+WsHandshake::WsHandshake(string host, string path, std::vector<string> protocols,
+                         const std::map<string, string, case_insensitive_less> &headers)
+    : mHost(std::move(host)), mPath(std::move(path)), mProtocols(std::move(protocols)),
+      mRequestHeaders(headers.begin(), headers.end()) {
 
 	if (mHost.empty())
 		throw std::invalid_argument("WebSocket HTTP host cannot be empty");
 
 	if (mPath.empty())
 		throw std::invalid_argument("WebSocket HTTP path cannot be empty");
+
+	for (auto &[name, value] : mRequestHeaders) {
+		if (name.empty()) {
+			throw std::invalid_argument("WebSocket HTTP header name cannot be empty");
+		}
+		value.erase(std::remove(value.begin(), value.end(), '\r'), value.end());
+		std::replace(value.begin(), value.end(), '\n', ' ');
+	}
 }
 
 string WsHandshake::host() const {
@@ -55,6 +65,11 @@ std::vector<string> WsHandshake::protocols() const {
 	return mProtocols;
 }
 
+http_headers WsHandshake::requestHeaders() const {
+	std::unique_lock lock(mMutex);
+	return mRequestHeaders;
+}
+
 string WsHandshake::generateHttpRequest() {
 	std::unique_lock lock(mMutex);
 	mKey = generateKey();
@@ -64,7 +79,7 @@ string WsHandshake::generateHttpRequest() {
 	             "Host: " +
 	             mHost +
 	             "\r\n"
-	             "Connection: upgrade\r\n"
+	             "Connection: Upgrade\r\n"
 	             "Upgrade: websocket\r\n"
 	             "Sec-WebSocket-Version: 13\r\n"
 	             "Sec-WebSocket-Key: " +
@@ -73,6 +88,10 @@ string WsHandshake::generateHttpRequest() {
 	if (!mProtocols.empty())
 		out += "Sec-WebSocket-Protocol: " + utils::implode(mProtocols, ',') + "\r\n";
 
+	for (auto const &[name, value] : mRequestHeaders) {
+		out += name + ": " + value + "\r\n";
+	}
+
 	out += "\r\n";
 
 	return out;
@@ -80,12 +99,18 @@ string WsHandshake::generateHttpRequest() {
 
 string WsHandshake::generateHttpResponse() {
 	std::unique_lock lock(mMutex);
-	const string out = "HTTP/1.1 101 Switching Protocols\r\n"
-	                   "Server: libdatachannel\r\n"
-	                   "Connection: upgrade\r\n"
-	                   "Upgrade: websocket\r\n"
-	                   "Sec-WebSocket-Accept: " +
-	                   computeAcceptKey(mKey) + "\r\n\r\n";
+
+	string out = "HTTP/1.1 101 Switching Protocols\r\n"
+	             "Server: libdatachannel\r\n"
+	             "Connection: Upgrade\r\n"
+	             "Upgrade: websocket\r\n"
+	             "Sec-WebSocket-Accept: " +
+	             computeAcceptKey(mKey) + "\r\n";
+
+	if (!mProtocols.empty())
+		out += "Sec-WebSocket-Protocol: " + utils::implode(mProtocols, ',') + "\r\n";
+
+	out += "\r\n";
 
 	return out;
 }
@@ -119,8 +144,6 @@ string WsHandshake::generateHttpError(int responseCode) {
 	const string out = "HTTP/1.1 " + error +
 	                   "\r\n"
 	                   "Server: libdatachannel\r\n"
-	                   "Connection: upgrade\r\n"
-	                   "Upgrade: websocket\r\n"
 	                   "Content-Type: text/plain\r\n"
 	                   "Content-Length: " +
 	                   to_string(error.size()) +
@@ -182,6 +205,8 @@ size_t WsHandshake::parseHttpRequest(const byte *buffer, size_t size) {
 	h = headers.find("sec-websocket-protocol");
 	if (h != headers.end())
 		mProtocols = utils::explode(h->second, ',');
+
+	mRequestHeaders = std::move(headers);
 
 	return length;
 }

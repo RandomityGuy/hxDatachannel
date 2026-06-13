@@ -33,6 +33,7 @@ public:
 	~TcpTransport();
 
 	void onBufferedAmount(amount_callback callback);
+	void setConnectTimeout(std::chrono::milliseconds connectTimeout);
 	void setReadTimeout(std::chrono::milliseconds readTimeout);
 
 	void start() override;
@@ -59,10 +60,12 @@ private:
 	void triggerBufferedAmount(size_t amount);
 
 	void process(PollService::Event event);
+	void processConnect(PollService::Event event);
 
 	const bool mIsActive;
 	string mHostname, mService;
 	amount_callback mBufferedAmountCallback;
+	optional<std::chrono::milliseconds> mConnectTimeout;
 	optional<std::chrono::milliseconds> mReadTimeout;
 
 	std::list<std::tuple<struct sockaddr_storage, socklen_t>> mResolved;

@@ -1,14 +1,14 @@
-cmake_minimum_required (VERSION 3.7)
+cmake_minimum_required (VERSION 3.10)
 project (libjuice
-	VERSION 1.3.3
+	VERSION 1.7.2
 	LANGUAGES C)
 set(PROJECT_DESCRIPTION "UDP Interactive Connectivity Establishment (ICE) library")
 
+option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(USE_NETTLE "Use Nettle for hash functions" OFF)
 option(NO_SERVER "Disable server support" OFF)
 option(NO_TESTS "Disable tests build" OFF)
-option(NO_EXPORT_HEADER "Disable export header" OFF)
-set(WARNINGS_AS_ERRORS OFF)
+option(WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(FUZZER "Enable oss-fuzz fuzzing" OFF)
 option(CLANG_TIDY "Enable clang-tidy" OFF)
 
@@ -17,7 +17,7 @@ option(DISABLE_CONSENT_FRESHNESS "Disable RFC 7675 Consent Freshness" OFF)
 option(ENABLE_LOCALHOST_ADDRESS "List localhost addresses in candidates" OFF)
 option(ENABLE_LOCAL_ADDRESS_TRANSLATION "Translate local addresses to localhost" OFF)
 
-set(C_STANDARD 11)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
@@ -54,6 +54,7 @@ set(LIBJUICE_SOURCES
 	${CMAKE_CURRENT_SOURCE_DIR}/src/server.c
 	${CMAKE_CURRENT_SOURCE_DIR}/src/stun.c
 	${CMAKE_CURRENT_SOURCE_DIR}/src/timestamp.c
+	${CMAKE_CURRENT_SOURCE_DIR}/src/tcp.c
 	${CMAKE_CURRENT_SOURCE_DIR}/src/turn.c
 	${CMAKE_CURRENT_SOURCE_DIR}/src/udp.c
 )
@@ -68,6 +69,10 @@ set(TESTS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test/main.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test/crc32.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test/base64.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/stun-unhandled.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/stun-unhandled-multiple.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/stun-unhandled-no-host.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/stun-unhandled-unhandle.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test/stun.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test/gathering.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test/connectivity.c
@@ -78,6 +83,8 @@ set(TESTS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test/server.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test/conflict.c
     ${CMAKE_CURRENT_SOURCE_DIR}/test/bind.c
+	${CMAKE_CURRENT_SOURCE_DIR}/test/ufrag.c
+	${CMAKE_CURRENT_SOURCE_DIR}/test/tcp.c
 )
 source_group("Test Files" FILES "${TESTS_SOURCES}")
 
@@ -89,7 +96,7 @@ source_group("Fuzzer Files" FILES "${FUZZER_SOURCES}")
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-add_library(juice SHARED ${LIBJUICE_SOURCES})
+add_library(juice ${LIBJUICE_SOURCES})
 set_target_properties(juice PROPERTIES VERSION ${PROJECT_VERSION})
 target_include_directories(juice PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -107,7 +114,6 @@ target_include_directories(juice-static PUBLIC
 target_include_directories(juice-static PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/juice)
 target_include_directories(juice-static PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(juice-static PRIVATE $<$<CONFIG:Release>:RELEASE=1>)
-target_compile_definitions(juice-static PUBLIC JUICE_STATIC)
 target_link_libraries(juice-static PRIVATE Threads::Threads)
 
 if(WIN32)
@@ -155,7 +161,7 @@ install(TARGETS juice EXPORT LibJuiceTargets
 
 install(FILES ${LIBJUICE_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/juice)
 
-# Export Targets
+# Export targets
 install(
 	EXPORT LibJuiceTargets
 	FILE LibJuiceTargets.cmake
@@ -163,37 +169,37 @@ install(
 	DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibJuice
 )
 
-# Export config
-install(
-        FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LibJuiceConfig.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibJuice
-)
-
 include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LibJuiceConfig.cmake.in
+    ${CMAKE_BINARY_DIR}/LibJuiceConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibJuice
+    NO_SET_AND_CHECK_MACRO
+    NO_CHECK_REQUIRED_COMPONENTS_MACRO
+)
 write_basic_package_version_file(
     ${CMAKE_BINARY_DIR}/LibJuiceConfigVersion.cmake
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion)
-install(FILES ${CMAKE_BINARY_DIR}/LibJuiceConfigVersion.cmake
+    COMPATIBILITY SameMajorVersion
+)
+# Export config and version files
+install(FILES
+	${CMAKE_BINARY_DIR}/LibJuiceConfig.cmake
+	${CMAKE_BINARY_DIR}/LibJuiceConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibJuice)
 
-if(NOT NO_EXPORT_HEADER AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.12")
-	include(GenerateExportHeader)
-	generate_export_header(juice
-		EXPORT_MACRO_NAME JUICE_EXPORT
-		NO_EXPORT_MACRO_NAME JUICE_NO_EXPORT
-		DEPRECATED_MACRO_NAME JUICE_DEPRECATED
-		STATIC_DEFINE JUICE_STATIC)
-	target_include_directories(juice PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
-	target_compile_definitions(juice PUBLIC -DJUICE_HAS_EXPORT_HEADER)
-	set_target_properties(juice PROPERTIES C_VISIBILITY_PRESET hidden)
-	install(FILES ${PROJECT_BINARY_DIR}/juice_export.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/juice)
-else()
-	target_compile_definitions(juice PRIVATE JUICE_EXPORTS)
-	target_compile_definitions(juice-static PRIVATE JUICE_EXPORTS)
+set_target_properties(juice PROPERTIES C_VISIBILITY_PRESET hidden)
+target_compile_definitions(juice PRIVATE JUICE_EXPORTS)
+if (NOT BUILD_SHARED_LIBS)
+	target_compile_definitions(juice PUBLIC JUICE_STATIC)
 endif()
+target_compile_definitions(juice-static PRIVATE JUICE_EXPORTS)
+target_compile_definitions(juice-static PUBLIC JUICE_STATIC)
 
-if(NOT MSVC)
+if(MSVC)
+	target_compile_options(juice PRIVATE /utf-8)
+	target_compile_options(juice-static PRIVATE /utf-8)
+else()
 	target_compile_options(juice PRIVATE -Wall -Wextra)
 	target_compile_options(juice-static PRIVATE -Wall -Wextra)
 endif()
@@ -237,6 +243,10 @@ if(NOT NO_TESTS)
 		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER com.github.paullouisageneau.libjuice.tests)
 
 	target_link_libraries(juice-tests juice Threads::Threads)
+
+	if(WIN32)
+		target_link_libraries(juice-tests ws2_32)
+	endif()
 endif()
 
 # Fuzzer

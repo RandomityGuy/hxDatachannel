@@ -14,6 +14,7 @@
 #include "global.hpp"
 //
 #include "datachannel.hpp"
+#include "iceudpmuxlistener.hpp"
 #include "peerconnection.hpp"
 #include "track.hpp"
 
@@ -29,13 +30,24 @@
 
 // Media
 #include "av1rtppacketizer.hpp"
+#include "dependencydescriptor.hpp"
+#include "rtppacketizer.hpp"
+#include "rtpdepacketizer.hpp"
 #include "h264rtppacketizer.hpp"
+#include "h264rtpdepacketizer.hpp"
 #include "h265rtppacketizer.hpp"
+#include "h265rtpdepacketizer.hpp"
+#include "vp8rtppacketizer.hpp"
+#include "vp8rtpdepacketizer.hpp"
+#include "vp9rtppacketizer.hpp"
+#include "vp9rtpdepacketizer.hpp"
 #include "mediahandler.hpp"
+#include "rtcpapphandler.hpp"
 #include "plihandler.hpp"
+#include "rembhandler.hpp"
+#include "pacinghandler.hpp"
 #include "rtcpnackresponder.hpp"
 #include "rtcpreceivingsession.hpp"
 #include "rtcpsrreporter.hpp"
-#include "rtppacketizer.hpp"
 
 #endif // RTC_ENABLE_MEDIA

@@ -1,5 +1,43 @@
 Changelog
 
+2.8.0
+
+#778 - Backport cryptex to v2 branch
+
+#770 - Fix AES 192 kdf
+
+#760 - Properly support null crypto and null auth scenario
+
+2.7.0
+
+#746 - Fix function signature mismatch for srtp_remove_stream
+
+#733 - Fix srtp_unprotect_rtcp_mki when RTP auth != RTCP
+
+2.6.0
+
+#667 - remove use of pointers to 32bit values
+
+#666 - Cleaning up cmake and enabled more warnings.
+
+#665 - start using const on internal arguments
+
+#662 - Some srtp_driver fixes
+
+#661 - remove travis reference from README.md
+
+#660 - meson.build: implement mbedtls support
+
+#649 - iv length is constant so set only once
+
+#507 - Add x86 SIMD optimizations to crypto datatypes
+
+#643 - Add a missing typedef for stream list ctx
+
+#641 - cmake: Rename TEST_APPS as LIBSRTP_TEST_APPS option
+
+#640 - cmake: Support configuring as subproject
+
 2.5.0
 
 #636 - Make mbedtls hmac less restrictive in line with RFC and library capabilities

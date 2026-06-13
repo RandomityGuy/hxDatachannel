@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.13)
 project(libdatachannel
-	VERSION 0.19.5
-	LANGUAGES CXX C)
+	VERSION 0.24.4
+	LANGUAGES CXX)
 set(PROJECT_DESCRIPTION "C/C++ WebRTC network library featuring Data Channels, Media Transport, and WebSockets")
 
 include(GNUInstallDirs)
@@ -23,6 +23,14 @@ set(NO_TESTS ON)
 set(WARNINGS_AS_ERRORS OFF)
 set(CAPI_STDCALL OFF)
 set(SCTP_DEBUG OFF)
+
+option(BUILD_SHARED_DEPS_LIBS "Build submodules as shared libraries" OFF)
+if(NOT NO_MEDIA AND NOT PREFER_SYSTEM_LIB)
+	# libsrtp2 v2.7.0 requires cmake >= v3.21.0
+	if(CMAKE_VERSION VERSION_LESS 3.21)
+		message(FATAL_ERROR "CMake >= v3.21 is required to build libdatachannel with media support (with submodules).")
+	endif()
+endif()
 
 if (USE_GNUTLS AND USE_MBEDTLS)
 	message(FATAL_ERROR "Both USE_MBEDTLS and USE_GNUTLS cannot be enabled at the same time")
@@ -47,8 +55,8 @@ if(NOT WARNINGS_AS_ERRORS AND NOT USE_SYSTEM_SRTP)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(BUILD_SHARED_LIBS OFF) # to force usrsctp to be built static
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(WIN32)
 	add_definitions(-DWIN32_LEAN_AND_MEAN)
@@ -63,7 +71,9 @@ set(LIBDATACHANNEL_SOURCES
 	${CMAKE_CURRENT_SOURCE_DIR}/src/channel.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/configuration.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/datachannel.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/dependencydescriptor.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/description.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/iceudpmuxlistener.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/mediahandler.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/global.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/message.cpp
@@ -73,18 +83,28 @@ set(LIBDATACHANNEL_SOURCES
 	${CMAKE_CURRENT_SOURCE_DIR}/src/websocket.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/websocketserver.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/rtppacketizationconfig.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/video_layers_allocation.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/rtcpsrreporter.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/rtppacketizer.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/rtpdepacketizer.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/h264rtppacketizer.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/h264rtpdepacketizer.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/nalunit.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/h265rtppacketizer.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/h265rtpdepacketizer.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/h265nalunit.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/av1rtppacketizer.cpp
-	${CMAKE_CURRENT_SOURCE_DIR}/src/nalunit.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/vp8rtppacketizer.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/vp8rtpdepacketizer.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/vp9rtppacketizer.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/vp9rtpdepacketizer.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/rtcpnackresponder.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/rtp.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/capi.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/plihandler.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/pacinghandler.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/rembhandler.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/rtcpapphandler.cpp
 )
 
 set(LIBDATACHANNEL_HEADERS
@@ -92,12 +112,15 @@ set(LIBDATACHANNEL_HEADERS
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/channel.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/configuration.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/datachannel.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/dependencydescriptor.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/description.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/iceudpmuxlistener.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/mediahandler.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rtcpreceivingsession.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/common.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/global.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/message.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/frameinfo.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/peerconnection.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/reliability.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rtc.h
@@ -107,17 +130,28 @@ set(LIBDATACHANNEL_HEADERS
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/websocket.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/websocketserver.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rtppacketizationconfig.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/video_layers_allocation.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rtcpsrreporter.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rtppacketizer.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rtpdepacketizer.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/h264rtppacketizer.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/h264rtpdepacketizer.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/nalunit.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/h265rtppacketizer.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/h265rtpdepacketizer.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/h265nalunit.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/av1rtppacketizer.hpp
-	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/nalunit.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/vp8rtppacketizer.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/vp8rtpdepacketizer.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/vp9rtppacketizer.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/vp9rtpdepacketizer.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rtcpnackresponder.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/utils.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/plihandler.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/pacinghandler.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rembhandler.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/rtcpapphandler.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc/version.h
 )
 
 set(LIBDATACHANNEL_IMPL_SOURCES
@@ -127,6 +161,7 @@ set(LIBDATACHANNEL_IMPL_SOURCES
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/dtlssrtptransport.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/dtlstransport.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/icetransport.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/iceudpmuxlistener.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/init.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/peerconnection.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/logcounter.cpp
@@ -159,6 +194,7 @@ set(LIBDATACHANNEL_IMPL_HEADERS
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/dtlssrtptransport.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/dtlstransport.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/icetransport.hpp
+	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/iceudpmuxlistener.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/init.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/internals.hpp
 	${CMAKE_CURRENT_SOURCE_DIR}/src/impl/peerconnection.hpp
@@ -191,14 +227,27 @@ set(TESTS_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test/connectivity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/negotiated.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/reliability.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/test/simulcast_sdp_generation.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/test/simulcast_sdp_parsing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/turn_connectivity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/track.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test/video_layers_allocation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/capi_connectivity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/capi_track.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/websocket.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/websocketserver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/capi_websocketserver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test/benchmark.cpp
+)
+
+if(NOT NO_MEDIA)
+    list(APPEND TESTS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/test/fir.cpp)
+    list(APPEND TESTS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/test/rtx.cpp)
+    list(APPEND TESTS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/test/rtcp_app.cpp)
+endif()
+
+set(TESTS_HEADERS 
+	${CMAKE_CURRENT_SOURCE_DIR}/test/test.hpp
 )
 
 set(TESTS_UWP_RESOURCES
@@ -220,6 +269,25 @@ set(BENCHMARK_UWP_RESOURCES
 	${CMAKE_CURRENT_SOURCE_DIR}/test/uwp/benchmark/StoreLogo.png
 	${CMAKE_CURRENT_SOURCE_DIR}/test/uwp/benchmark/Windows_TemporaryKey.pfx
 )
+
+add_library(datachannel-static STATIC EXCLUDE_FROM_ALL
+	${LIBDATACHANNEL_SOURCES}
+	${LIBDATACHANNEL_HEADERS}
+	${LIBDATACHANNEL_IMPL_SOURCES}
+	${LIBDATACHANNEL_IMPL_HEADERS})
+set_target_properties(datachannel-static PROPERTIES
+	VERSION ${PROJECT_VERSION}
+	CXX_STANDARD 17)
+
+target_compile_definitions(datachannel-static PRIVATE RTC_EXPORTS)
+target_compile_definitions(datachannel-static PUBLIC RTC_STATIC)
+
+if(BUILD_SHARED_LIBS AND NOT BUILD_SHARED_DEPS_LIBS)
+	set(BUILD_SHARED_LIBS OFF)
+	set(INSTALL_DEPS_LIBS OFF)
+else()
+	set(INSTALL_DEPS_LIBS ON)
+endif()
 
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
@@ -250,65 +318,41 @@ else()
 		target_compile_definitions(usrsctp PUBLIC -DSCTP_STDINT_INCLUDE=<stdint.h>)
 	endif()
 	add_library(Usrsctp::Usrsctp ALIAS usrsctp)
+
+	if(INSTALL_DEPS_LIBS)
+		install(TARGETS usrsctp EXPORT LibDataChannelTargets)
+		# Fix directories
+		set_target_properties(usrsctp PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "")
+		target_include_directories(usrsctp INTERFACE
+			$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/usrsctp/usrsctplib>
+			$<INSTALL_INTERFACE:>)
+	endif()
 endif()
-
-# add_library(datachannel SHARED
-# 	${LIBDATACHANNEL_SOURCES}
-# 	${LIBDATACHANNEL_HEADERS}
-# 	${LIBDATACHANNEL_IMPL_SOURCES}
-# 	${LIBDATACHANNEL_IMPL_HEADERS})
-# set_target_properties(datachannel PROPERTIES
-# 	VERSION ${PROJECT_VERSION}
-# 	SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
-# 	CXX_STANDARD 17
-# 	CXX_VISIBILITY_PRESET default)
-# target_compile_definitions(datachannel PRIVATE RTC_EXPORTS)
-
-add_library(datachannel-static STATIC EXCLUDE_FROM_ALL
-	${LIBDATACHANNEL_SOURCES}
-	${LIBDATACHANNEL_HEADERS}
-	${LIBDATACHANNEL_IMPL_SOURCES}
-	${LIBDATACHANNEL_IMPL_HEADERS})
-set_target_properties(datachannel-static PROPERTIES
-	VERSION ${PROJECT_VERSION}
-	CXX_STANDARD 17)
-target_compile_definitions(datachannel-static PRIVATE RTC_EXPORTS)
-target_compile_definitions(datachannel-static PUBLIC RTC_STATIC)
-
-# target_include_directories(datachannel PUBLIC
-#     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-#     $<INSTALL_INTERFACE:include>)
-# target_include_directories(datachannel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/rtc)
-# target_include_directories(datachannel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-# target_link_libraries(datachannel PRIVATE Threads::Threads)
-# target_link_libraries(datachannel PRIVATE Usrsctp::Usrsctp plog::plog)
 
 target_include_directories(datachannel-static PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
-target_include_directories(datachannel-static PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/rtc)
-target_include_directories(datachannel-static PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(datachannel-static PRIVATE Threads::Threads)
-target_link_libraries(datachannel-static PRIVATE Usrsctp::Usrsctp plog::plog)
+target_include_directories(datachannel-static PRIVATE
+	${CMAKE_CURRENT_SOURCE_DIR}/include/rtc
+	${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(datachannel-static PRIVATE
+	Threads::Threads
+	Usrsctp::Usrsctp
+	$<BUILD_INTERFACE:plog::plog>)
 
 if(WIN32)
-	# target_link_libraries(datachannel PUBLIC ws2_32) # winsock2
 	target_link_libraries(datachannel-static PUBLIC ws2_32) # winsock2
 endif()
 
 if (NO_WEBSOCKET)
-	# target_compile_definitions(datachannel PUBLIC RTC_ENABLE_WEBSOCKET=0)
 	target_compile_definitions(datachannel-static PUBLIC RTC_ENABLE_WEBSOCKET=0)
 else()
-	# target_compile_definitions(datachannel PUBLIC RTC_ENABLE_WEBSOCKET=1)
 	target_compile_definitions(datachannel-static PUBLIC RTC_ENABLE_WEBSOCKET=1)
 endif()
 
 if(NO_MEDIA)
-	# target_compile_definitions(datachannel PUBLIC RTC_ENABLE_MEDIA=0)
 	target_compile_definitions(datachannel-static PUBLIC RTC_ENABLE_MEDIA=0)
 else()
-	# target_compile_definitions(datachannel PUBLIC RTC_ENABLE_MEDIA=1)
 	target_compile_definitions(datachannel-static PUBLIC RTC_ENABLE_MEDIA=1)
 	if(USE_SYSTEM_SRTP)
 		find_package(libSRTP REQUIRED)
@@ -319,15 +363,16 @@ else()
 				IMPORTED_LINK_INTERFACE_LANGUAGES C
 				IMPORTED_LOCATION ${SRTP_LIBRARIES})
 		endif()
-		# target_compile_definitions(datachannel PRIVATE RTC_SYSTEM_SRTP=1)
 		target_compile_definitions(datachannel-static PRIVATE RTC_SYSTEM_SRTP=1)
-		# target_link_libraries(datachannel PRIVATE libSRTP::srtp2)
 		target_link_libraries(datachannel-static PRIVATE libSRTP::srtp2)
 	else()
-		add_subdirectory(deps/libsrtp EXCLUDE_FROM_ALL)
-		# target_compile_definitions(datachannel PRIVATE RTC_SYSTEM_SRTP=0)
+		if(NOT TARGET srtp2)
+			add_subdirectory(deps/libsrtp EXCLUDE_FROM_ALL)
+			if(INSTALL_DEPS_LIBS)
+				install(TARGETS srtp2 EXPORT LibDataChannelTargets)
+			endif()
+		endif()
 		target_compile_definitions(datachannel-static PRIVATE RTC_SYSTEM_SRTP=0)
-		# target_link_libraries(datachannel PRIVATE srtp2)
 		target_link_libraries(datachannel-static PRIVATE srtp2)
 	endif()
 endif()
@@ -342,93 +387,19 @@ if (USE_GNUTLS)
 			IMPORTED_LINK_INTERFACE_LANGUAGES C
 			IMPORTED_LOCATION "${GNUTLS_LIBRARIES}")
 	endif()
-	# target_compile_definitions(datachannel PRIVATE USE_GNUTLS=1)
 	target_compile_definitions(datachannel-static PRIVATE USE_GNUTLS=1)
-	# target_link_libraries(datachannel PRIVATE GnuTLS::GnuTLS)
 	target_link_libraries(datachannel-static PRIVATE GnuTLS::GnuTLS)
 	if (NOT NO_WEBSOCKET)
 		# Needed for SHA1, it should be present as GnuTLS cryptography backend
 		find_package(Nettle REQUIRED)
-		# target_link_libraries(datachannel PRIVATE Nettle::Nettle)
 		target_link_libraries(datachannel-static PRIVATE Nettle::Nettle)
 	endif()
 elseif(USE_MBEDTLS)
+	file(GLOB MBEDTLS_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/*.c)
 	add_library(MbedTLS STATIC
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/aes.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/aesni.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/aria.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/asn1parse.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/asn1write.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/base64.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/bignum.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/camellia.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ccm.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/chacha20.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/chachapoly.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/cipher.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/cipher_wrap.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/cmac.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ctr_drbg.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/des.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/dhm.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ecdh.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ecdsa.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ecjpake.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ecp.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ecp_curves.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/entropy.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/entropy_poll.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/error.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/gcm.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/hkdf.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/hmac_drbg.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/md.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/md5.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/memory_buffer_alloc.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/mps_reader.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/mps_trace.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/nist_kw.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/oid.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/padlock.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/pem.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/pk.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/pk_wrap.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/pkcs12.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/pkcs5.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/pkparse.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/pkwrite.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/platform.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/platform_util.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/poly1305.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ripemd160.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/rsa.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/rsa_alt_helpers.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/sha1.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/sha256.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/sha512.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/threading.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/timing.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/version.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/version_features.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/x509.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/x509_create.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/x509_crl.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/x509_crt.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/x509_csr.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/x509write_crt.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/x509write_csr.c
-	    ${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/debug.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/net_sockets.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_cache.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_ciphersuites.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_cli.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_cookie.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_msg.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_srv.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_ticket.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_tls.c
-		${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/library/ssl_tls13_keys.c
+		${MBEDTLS_SRCS}
 	)
+	target_compile_definitions(MbedTLS PUBLIC MBEDTLS_SSL_DTLS_SRTP)
 	target_include_directories(MbedTLS PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/include)
 
 	target_include_directories(datachannel-static PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls/include)
@@ -455,102 +426,68 @@ else()
 		endif()
 	endif()
 	find_package(OpenSSL REQUIRED)
-	# target_compile_definitions(datachannel PRIVATE USE_GNUTLS=0)
 	target_compile_definitions(datachannel-static PRIVATE USE_GNUTLS=0)
-	# target_link_libraries(datachannel PRIVATE OpenSSL::SSL)
 	target_link_libraries(datachannel-static PRIVATE OpenSSL::SSL)
 endif()
 
 if (USE_NICE)
 	find_package(LibNice REQUIRED)
-	# target_compile_definitions(datachannel PRIVATE USE_NICE=1)
 	target_compile_definitions(datachannel-static PRIVATE USE_NICE=1)
-	# target_link_libraries(datachannel PRIVATE LibNice::LibNice)
 	target_link_libraries(datachannel-static PRIVATE LibNice::LibNice)
 else()
-	# target_compile_definitions(datachannel PRIVATE USE_NICE=0)
 	target_compile_definitions(datachannel-static PRIVATE USE_NICE=0)
 	if(USE_SYSTEM_JUICE)
-		find_package(LibJuice REQUIRED)
-		# target_compile_definitions(datachannel PRIVATE RTC_SYSTEM_JUICE=1)
+		find_package(LibJuice 1.7.0 REQUIRED)
 		target_compile_definitions(datachannel-static PRIVATE RTC_SYSTEM_JUICE=1)
-		# target_link_libraries(datachannel PRIVATE LibJuice::LibJuice)
 		target_link_libraries(datachannel-static PRIVATE LibJuice::LibJuice)
 	else()
 		add_subdirectory(deps/libjuice EXCLUDE_FROM_ALL)
-		# target_compile_definitions(datachannel PRIVATE RTC_SYSTEM_JUICE=0)
+		if(INSTALL_DEPS_LIBS)
+			install(TARGETS juice EXPORT LibDataChannelTargets)
+		endif()
 		target_compile_definitions(datachannel-static PRIVATE RTC_SYSTEM_JUICE=0)
-		# target_link_libraries(datachannel PRIVATE LibJuice::LibJuiceStatic)
 		target_link_libraries(datachannel-static PRIVATE LibJuice::LibJuiceStatic)
 	endif()
 endif()
 
 if(CAPI_STDCALL)
-	# target_compile_definitions(datachannel PUBLIC CAPI_STDCALL)
 	target_compile_definitions(datachannel-static PUBLIC CAPI_STDCALL)
 endif()
-
-#set_target_properties(datachannel PROPERTIES EXPORT_NAME LibDataChannel)
-#add_library(LibDataChannel::LibDataChannel ALIAS datachannel)
 
 set_target_properties(datachannel-static PROPERTIES EXPORT_NAME LibDataChannelStatic)
 add_library(LibDataChannel::LibDataChannelStatic ALIAS datachannel-static)
 
 if(NOT MSVC)
-	# target_compile_options(datachannel PRIVATE -Wall -Wextra)
 	target_compile_options(datachannel-static PRIVATE -Wall -Wextra)
 endif()
 
 if(WARNINGS_AS_ERRORS)
 	if(MSVC)
-		#target_compile_options(datachannel PRIVATE /WX)
 		target_compile_options(datachannel-static PRIVATE /WX)
 	else()
-		# target_compile_options(datachannel PRIVATE -Werror)
 		target_compile_options(datachannel-static PRIVATE -Werror)
 	endif()
 endif()
 
-#install(TARGETS datachannel EXPORT LibDataChannelTargets
-#	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-#	LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-#	ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-#)
-
-#install(FILES ${LIBDATACHANNEL_HEADERS}
-#	DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rtc
-#)
-
-# Export targets
-#install(
-#	EXPORT LibDataChannelTargets
-#	FILE LibDataChannelTargets.cmake
-#	NAMESPACE LibDataChannel::
-#	DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibDataChannel
-#)
-
-# Export config
-#install(
-#	FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake/LibDataChannelConfig.cmake
-#	DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibDataChannel
-#)
-
-# Export config version
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
+    ${CMAKE_BINARY_DIR}/LibDataChannelConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+# Export config and version files
+install(FILES
+	${CMAKE_BINARY_DIR}/LibDataChannelConfig.cmake
 	${CMAKE_BINARY_DIR}/LibDataChannelConfigVersion.cmake
-	VERSION ${PROJECT_VERSION}
-	COMPATIBILITY SameMajorVersion)
-install(FILES ${CMAKE_BINARY_DIR}/LibDataChannelConfigVersion.cmake
-	DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibDataChannel)
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/LibDataChannel)
 
 # Tests
 if(NOT NO_TESTS)
 	if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
 		# Add resource files needed for UWP apps.
-		add_executable(datachannel-tests ${TESTS_SOURCES} ${TESTS_UWP_RESOURCES})
+		add_executable(datachannel-tests ${TESTS_SOURCES} ${TESTS_HEADERS} ${TESTS_UWP_RESOURCES})
 	else()
-		add_executable(datachannel-tests ${TESTS_SOURCES})
+		add_executable(datachannel-tests ${TESTS_SOURCES} ${TESTS_HEADERS})
 	endif()
 
 	set_target_properties(datachannel-tests PROPERTIES
@@ -562,7 +499,7 @@ if(NOT NO_TESTS)
 		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER com.github.paullouisageneau.libdatachannel.tests)
 
 	target_include_directories(datachannel-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-	# target_link_libraries(datachannel-tests datachannel Threads::Threads)
+	target_link_libraries(datachannel-tests datachannel Threads::Threads)
 
 	# Benchmark
 	if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
@@ -582,7 +519,7 @@ if(NOT NO_TESTS)
 
 	target_compile_definitions(datachannel-benchmark PRIVATE BENCHMARK_MAIN=1)
 	target_include_directories(datachannel-benchmark PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-	# target_link_libraries(datachannel-benchmark datachannel Threads::Threads)
+	target_link_libraries(datachannel-benchmark datachannel Threads::Threads)
 endif()
 
 # Examples

@@ -12,6 +12,7 @@
 
 #include "candidate.hpp"
 #include "common.hpp"
+#include "rtp.hpp"
 
 #include <iostream>
 #include <map>
@@ -66,9 +67,10 @@ public:
 	bool ended() const;
 
 	void hintType(Type type);
-	void setFingerprint(CertificateFingerprint f);
 	void addIceOption(string option);
 	void removeIceOption(const string &option);
+	void setIceAttribute(string ufrag, string pwd);
+	void setFingerprint(CertificateFingerprint f);
 
 	std::vector<string> attributes() const;
 	void addAttribute(string attr);
@@ -85,11 +87,61 @@ public:
 	string generateSdp(string_view eol = "\r\n") const;
 	string generateApplicationSdp(string_view eol = "\r\n") const;
 
+	class RTC_CPP_EXPORT RidAttribute {
+	public:
+		RidAttribute(string name, string value);
+
+		[[nodiscard]] const string &name() const;
+		[[nodiscard]] const string &value() const;
+
+		void value(string value);
+
+	private:
+		string mName;
+		string mValue;
+	};
+
+	class RTC_CPP_EXPORT Rid {
+	public:
+		explicit Rid(string rid);
+		Rid(string rid, std::vector<RidAttribute> attributes);
+
+		[[nodiscard]] const string &rid() const;
+		[[nodiscard]] const std::vector<RidAttribute> &attributes() const;
+
+	private:
+		string mRid;
+		std::vector<RidAttribute> mAttributes;
+	};
+
+	class RTC_CPP_EXPORT RidBuilder {
+	public:
+		explicit RidBuilder(string rid);
+
+		// https://datatracker.ietf.org/doc/html/rfc8851#name-arid-restrictions
+		RidBuilder& max_width(uint32_t value);
+		RidBuilder& max_height(uint32_t value);
+		RidBuilder& max_fps(uint32_t value);
+		RidBuilder& max_br(uint32_t value);
+
+		RidBuilder& custom(string key, string value);
+
+		// One time use only
+		[[nodiscard]] Rid build();
+
+	private:
+		string mRid;
+		std::vector<RidAttribute> mAttributes;
+
+		RidBuilder& saveAttribute(string key, string value);
+	};
+
 	class RTC_CPP_EXPORT Entry {
 	public:
 		virtual ~Entry() = default;
 
 		virtual string type() const;
+		virtual string protocol() const;
 		virtual string description() const;
 		virtual string mid() const;
 
@@ -102,7 +154,10 @@ public:
 		std::vector<string> attributes() const;
 		void addAttribute(string attr);
 		void removeAttribute(const string &attr);
-		void addRid(string rid);
+		void addRid(string rid);	// Just the name
+		void addRid(Rid rid);		// With RFC 8851 attributes
+
+		std::vector<Rid> rids() const;
 
 		struct RTC_CPP_EXPORT ExtMap {
 			static int parseId(string_view description);
@@ -140,9 +195,10 @@ public:
 
 	private:
 		string mType;
+		string mProtocol;
 		string mDescription;
 		string mMid;
-		std::vector<string> mRids;
+		std::vector<Rid> mRids;
 		Direction mDirection;
 		bool mIsRemoved;
 	};
@@ -153,7 +209,6 @@ public:
 		Application(const string &mline, string mid);
 		virtual ~Application() = default;
 
-		string description() const override;
 		Application reciprocate() const;
 
 		void setSctpPort(uint16_t port);
@@ -175,8 +230,8 @@ public:
 	// Media (non-data)
 	class RTC_CPP_EXPORT Media : public Entry {
 	public:
-		Media(const string &sdp);
 		Media(const string &mline, string mid, Direction dir = Direction::SendOnly);
+		Media(const string &sdp);
 		virtual ~Media() = default;
 
 		string description() const override;
@@ -192,6 +247,11 @@ public:
 		std::vector<uint32_t> getSSRCs() const;
 		optional<std::string> getCNameForSsrc(uint32_t ssrc) const;
 
+		void addRtxSSRC(SSRC primarySsrc, SSRC rtxSsrc, optional<string> cname = nullopt);
+		void removeRtxSSRC(SSRC primarySsrc);
+		optional<SSRC> getRtxSsrcForSsrc(SSRC primarySsrc) const;
+		optional<SSRC> getSsrcForRtxSsrc(SSRC rtxSsrc) const;
+
 		int bitrate() const;
 		void setBitrate(int bitrate);
 
@@ -205,6 +265,8 @@ public:
 
 			void addFeedback(string fb);
 			void removeFeedback(const string &str);
+			bool hasFeedback(const string &str) const;
+
 			void addParameter(string p);
 			void removeParameter(const string &str);
 
@@ -227,6 +289,11 @@ public:
 
 		void addRtxCodec(int payloadType, int origPayloadType, unsigned int clockRate);
 
+		optional<int> getRtxPayloadType(int primaryPayloadType) const;
+
+		bool isRtxEnabled() const;
+		void disableRtx();
+
 		virtual void parseSdpLine(string_view line) override;
 
 	private:
@@ -234,9 +301,11 @@ public:
 
 		int mBas = -1;
 
+		std::vector<int> mOrderedPayloadTypes;
 		std::map<int, RtpMap> mRtpMaps;
 		std::vector<uint32_t> mSsrcs;
 		std::map<uint32_t, string> mCNameMap;
+		std::map<SSRC, SSRC> mSsrcToRtxSsrc;  // primary_ssrc -> rtx_ssrc
 	};
 
 	class RTC_CPP_EXPORT Audio : public Media {
@@ -248,6 +317,7 @@ public:
 		void addPCMACodec(int payloadType, optional<string> profile = std::nullopt);
 		void addPCMUCodec(int payloadType, optional<string> profile = std::nullopt);
 		void addAACCodec(int payloadType, optional<string> profile = std::nullopt);
+		void addG722Codec(int payloadType, optional<string> profile = std::nullopt);
 
 		[[deprecated("Use addAACCodec")]] inline void
 		addAacCodec(int payloadType, optional<string> profile = std::nullopt) {
@@ -268,6 +338,11 @@ public:
 		void addAV1Codec(int payloadType, optional<string> profile = std::nullopt);
 	};
 
+	// Adds RTX payload type mappings for SDP negotiation (codec level only).
+	// For per-stream RTX, also call Media::addRtxSSRC() once SSRCs are known.
+	// Set audio=true to also apply RTX to audio media streams.
+	void addRtx(optional<unsigned int> clockRate = nullopt, bool audio = false);
+
 	bool hasApplication() const;
 	bool hasAudioOrVideo() const;
 	bool hasMid(string_view mid) const;
@@ -279,15 +354,17 @@ public:
 	int addAudio(string mid = "audio", Direction dir = Direction::SendOnly);
 	void clearMedia();
 
-	variant<Media *, Application *> media(unsigned int index);
-	variant<const Media *, const Application *> media(unsigned int index) const;
-	unsigned int mediaCount() const;
+	variant<Media *, Application *> media(int index);
+	variant<const Media *, const Application *> media(int index) const;
+	int mediaCount() const;
 
 	const Application *application() const;
 	Application *application();
 
 	static Type stringToType(const string &typeString);
 	static string typeToString(Type type);
+
+	string sessionId() const;
 
 private:
 	optional<Candidate> defaultCandidate() const;
@@ -314,12 +391,11 @@ private:
 	bool mEnded = false;
 };
 
-} // namespace rtc
+RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, const Description &description);
+RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, Description::Type type);
+RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, Description::Role role);
+RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, const Description::Direction &direction);
 
-RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, const rtc::Description &description);
-RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, rtc::Description::Type type);
-RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, rtc::Description::Role role);
-RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out,
-                                        const rtc::Description::Direction &direction);
+} // namespace rtc
 
 #endif

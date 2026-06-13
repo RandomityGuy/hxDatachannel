@@ -34,11 +34,28 @@ using namespace std::placeholders;
 using namespace std::chrono_literals;
 using std::chrono::milliseconds;
 
+const string PemBeginCertificateTag = "-----BEGIN CERTIFICATE-----";
+
 WebSocket::WebSocket(optional<Configuration> optConfig, certificate_ptr certificate)
     : config(optConfig ? std::move(*optConfig) : Configuration()),
-      mCertificate(certificate ? std::move(certificate) : std::move(loadCertificate(config))),
-      mIsSecure(mCertificate != nullptr), mRecvQueue(RECV_QUEUE_LIMIT, message_size_func) {
+      mRecvQueue(RECV_QUEUE_LIMIT, message_size_func) {
 	PLOG_VERBOSE << "Creating WebSocket";
+
+	if (certificate) {
+		mCertificate = std::move(certificate);
+	} else if (config.certificatePemFile && config.keyPemFile) {
+		mCertificate = std::make_shared<Certificate>(
+		    config.certificatePemFile->find(PemBeginCertificateTag) != string::npos
+		        ? Certificate::FromString(*config.certificatePemFile, *config.keyPemFile)
+		        : Certificate::FromFile(*config.certificatePemFile, *config.keyPemFile,
+		                                config.keyPemPass.value_or("")));
+	} else if (config.certificatePemFile || config.keyPemFile) {
+		throw std::invalid_argument(
+		    "Either none or both certificate and key PEM files must be specified");
+	}
+
+	mIsSecure = mCertificate != nullptr;
+
 	if (config.proxyServer) {
 		if (config.proxyServer->type == ProxyServer::Type::Socks5)
 			throw std::invalid_argument(
@@ -49,22 +66,9 @@ WebSocket::WebSocket(optional<Configuration> optConfig, certificate_ptr certific
 	}
 }
 
-certificate_ptr WebSocket::loadCertificate(const Configuration& config) {
-	if (!config.certificatePemFile)
-		return nullptr;
-
-	if (config.keyPemFile)
-		return std::make_shared<Certificate>(
-			Certificate::FromFile(*config.certificatePemFile, *config.keyPemFile,
-										config.keyPemPass.value_or("")));
-
-	throw std::invalid_argument(
-		"Either none or both certificate and key PEM files must be specified");
-}
-
 WebSocket::~WebSocket() { PLOG_VERBOSE << "Destroying WebSocket"; }
 
-void WebSocket::open(const string &url) {
+void WebSocket::open(const string &url, const rtc::WebSocket::Headers &headers) {
 	PLOG_VERBOSE << "Opening WebSocket to URL: " << url;
 
 	if (state != State::Closed)
@@ -122,7 +126,8 @@ void WebSocket::open(const string &url) {
 
 	mHostname = hostname; // for TLS SNI and Proxy
 	mService = service;   // For proxy
-	std::atomic_store(&mWsHandshake, std::make_shared<WsHandshake>(host, path, config.protocols));
+	std::atomic_store(&mWsHandshake,
+	                  std::make_shared<WsHandshake>(host, path, config.protocols, headers));
 
 	changeState(State::Connecting);
 
@@ -156,7 +161,9 @@ bool WebSocket::isOpen() const { return state == State::Open; }
 
 bool WebSocket::isClosed() const { return state == State::Closed; }
 
-size_t WebSocket::maxMessageSize() const { return config.maxMessageSize.value_or(DEFAULT_MAX_MESSAGE_SIZE); }
+size_t WebSocket::maxMessageSize() const {
+	return config.maxMessageSize.value_or(DEFAULT_WS_MAX_MESSAGE_SIZE);
+}
 
 optional<message_variant> WebSocket::receive() {
 	auto next = mRecvQueue.pop();
@@ -229,35 +236,41 @@ shared_ptr<TcpTransport> WebSocket::setTcpTransport(shared_ptr<TcpTransport> tra
 		transport->onBufferedAmount(weak_bind(&WebSocket::triggerBufferedAmount, this, _1));
 
 		transport->onStateChange([this, weak_this = weak_from_this()](State transportState) {
-			auto shared_this = weak_this.lock();
-			if (!shared_this)
-				return;
-			switch (transportState) {
-			case State::Connected:
-				if (config.proxyServer)
-					initProxyTransport();
-				else if (mIsSecure)
-					initTlsTransport();
-				else
-					initWsTransport();
-				break;
-			case State::Failed:
-				triggerError("TCP connection failed");
-				remoteClose();
-				break;
-			case State::Disconnected:
-				remoteClose();
-				break;
-			default:
-				// Ignore
-				break;
-			}
+			if (auto locked = weak_this.lock())
+				std::invoke([=]() {
+					switch (transportState) {
+					case State::Connected:
+						if (config.proxyServer)
+							initProxyTransport();
+						else if (mIsSecure)
+							initTlsTransport();
+						else
+							initWsTransport();
+						break;
+					case State::Failed:
+						triggerError("TCP connection failed");
+						remoteClose();
+						break;
+					case State::Disconnected:
+						if (state == WebSocket::State::Connecting)
+							remoteClose();
+						break;
+					default:
+						// Ignore
+						break;
+					}
+				});
 		});
 
 		// WS transport sends a ping on read timeout
 		auto pingInterval = config.pingInterval.value_or(10000ms);
 		if (pingInterval > milliseconds::zero())
 			transport->setReadTimeout(pingInterval);
+
+		// Set TCP connect timeout if specified
+		auto connectTimeout = config.tcpConnectionTimeout.value_or(5000ms);
+		if (connectTimeout > milliseconds::zero())
+			transport->setConnectTimeout(connectTimeout);
 
 		scheduleConnectionTimeout();
 
@@ -282,27 +295,28 @@ shared_ptr<HttpProxyTransport> WebSocket::initProxyTransport() {
 			throw std::logic_error("No underlying TCP transport for Proxy transport");
 
 		auto stateChangeCallback = [this, weak_this = weak_from_this()](State transportState) {
-			auto shared_this = weak_this.lock();
-			if (!shared_this)
-				return;
-			switch (transportState) {
-			case State::Connected:
-				if (mIsSecure)
-					initTlsTransport();
-				else
-					initWsTransport();
-				break;
-			case State::Failed:
-				triggerError("Proxy connection failed");
-				remoteClose();
-				break;
-			case State::Disconnected:
-				remoteClose();
-				break;
-			default:
-				// Ignore
-				break;
-			}
+			if (auto locked = weak_this.lock())
+				std::invoke([=]() {
+					switch (transportState) {
+					case State::Connected:
+						if (mIsSecure)
+							initTlsTransport();
+						else
+							initWsTransport();
+						break;
+					case State::Failed:
+						triggerError("Proxy connection failed");
+						remoteClose();
+						break;
+					case State::Disconnected:
+						if (state == WebSocket::State::Connecting)
+							remoteClose();
+						break;
+					default:
+						// Ignore
+						break;
+					}
+				});
 		};
 
 		auto transport = std::make_shared<HttpProxyTransport>(
@@ -340,24 +354,25 @@ shared_ptr<TlsTransport> WebSocket::initTlsTransport() {
 		}
 
 		auto stateChangeCallback = [this, weak_this = weak_from_this()](State transportState) {
-			auto shared_this = weak_this.lock();
-			if (!shared_this)
-				return;
-			switch (transportState) {
-			case State::Connected:
-				initWsTransport();
-				break;
-			case State::Failed:
-				triggerError("TLS connection failed");
-				remoteClose();
-				break;
-			case State::Disconnected:
-				remoteClose();
-				break;
-			default:
-				// Ignore
-				break;
-			}
+			if (auto locked = weak_this.lock())
+				std::invoke([=]() {
+					switch (transportState) {
+					case State::Connected:
+						initWsTransport();
+						break;
+					case State::Failed:
+						triggerError("TLS connection failed");
+						remoteClose();
+						break;
+					case State::Disconnected:
+						if (state == WebSocket::State::Connecting)
+							remoteClose();
+						break;
+					default:
+						// Ignore
+						break;
+					}
+				});
 		};
 
 		bool verify = mHostname.has_value() && !config.disableTlsVerification;
@@ -419,32 +434,31 @@ shared_ptr<WsTransport> WebSocket::initWsTransport() {
 			atomic_store(&mWsHandshake, std::make_shared<WsHandshake>());
 
 		auto stateChangeCallback = [this, weak_this = weak_from_this()](State transportState) {
-			auto shared_this = weak_this.lock();
-			if (!shared_this)
-				return;
-			switch (transportState) {
-			case State::Connected:
-				if (state == WebSocket::State::Connecting) {
-					PLOG_DEBUG << "WebSocket open";
-					if (changeState(WebSocket::State::Open))
-						triggerOpen();
-				}
-				break;
-			case State::Failed:
-				triggerError("WebSocket connection failed");
-				remoteClose();
-				break;
-			case State::Disconnected:
-				remoteClose();
-				break;
-			default:
-				// Ignore
-				break;
-			}
+			if (auto locked = weak_this.lock())
+				std::invoke([=]() {
+					switch (transportState) {
+					case State::Connected:
+						if (state == WebSocket::State::Connecting) {
+							PLOG_DEBUG << "WebSocket open";
+							if (changeState(WebSocket::State::Open))
+								triggerOpen();
+						}
+						break;
+					case State::Failed:
+						triggerError("WebSocket connection failed");
+						remoteClose();
+						break;
+					case State::Disconnected:
+						remoteClose();
+						break;
+					default:
+						// Ignore
+						break;
+					}
+				});
 		};
 
-		auto maxOutstandingPings = config.maxOutstandingPings.value_or(0);
-		auto transport = std::make_shared<WsTransport>(lower, mWsHandshake, maxOutstandingPings,
+		auto transport = std::make_shared<WsTransport>(lower, mWsHandshake, config,
 		                                               weak_bind(&WebSocket::incoming, this, _1),
 		                                               stateChangeCallback);
 

@@ -4,7 +4,7 @@ NAME=libjuice
 CC=$(CROSS)gcc
 AR=$(CROSS)ar
 RM=rm -f
-CFLAGS=-O2 -pthread -fPIC -Wno-address-of-packed-member
+CFLAGS=-O2 -pthread -fPIC -fvisibility=hidden -Wno-address-of-packed-member
 LDFLAGS=-pthread
 LIBS=
 
@@ -54,7 +54,7 @@ test/%.o: test/%.c
 -include $(subst .c,.d,$(SRCS))
 
 $(NAME).a: $(OBJS)
-	$(AR) crf $@ $(OBJS)
+	$(AR) cr $@ $(OBJS)
 
 $(NAME).so: $(OBJS)
 	$(CC) $(LDFLAGS) -shared -o $@ $(OBJS) $(LDLIBS)

@@ -25,18 +25,19 @@ using std::chrono::milliseconds;
 
 namespace {
 
-std::unordered_map<int, void*> userPointerMap;
 std::unordered_map<int, shared_ptr<PeerConnection>> peerConnectionMap;
 std::unordered_map<int, shared_ptr<DataChannel>> dataChannelMap;
 std::unordered_map<int, shared_ptr<Track>> trackMap;
 #if RTC_ENABLE_MEDIA
 std::unordered_map<int, shared_ptr<RtcpSrReporter>> rtcpSrReporterMap;
 std::unordered_map<int, shared_ptr<RtpPacketizationConfig>> rtpConfigMap;
+std::unordered_map<int, shared_ptr<RtcpReceivingSession>> rtcpReceivingSessionMap;
 #endif
 #if RTC_ENABLE_WEBSOCKET
 std::unordered_map<int, shared_ptr<WebSocket>> webSocketMap;
 std::unordered_map<int, shared_ptr<WebSocketServer>> webSocketServerMap;
 #endif
+std::unordered_map<int, void *> userPointerMap;
 std::mutex mutex;
 int lastId = 0;
 
@@ -120,6 +121,7 @@ void eraseTrack(int tr) {
 #if RTC_ENABLE_MEDIA
 	rtcpSrReporterMap.erase(tr);
 	rtpConfigMap.erase(tr);
+	rtcpReceivingSessionMap.erase(tr);
 #endif
 	userPointerMap.erase(tr);
 }
@@ -131,9 +133,10 @@ size_t eraseAll() {
 	trackMap.clear();
 	peerConnectionMap.clear();
 #if RTC_ENABLE_MEDIA
-	count += rtcpSrReporterMap.size() + rtpConfigMap.size();
+	count += rtcpSrReporterMap.size() + rtpConfigMap.size() + rtcpReceivingSessionMap.size();
 	rtcpSrReporterMap.clear();
 	rtpConfigMap.clear();
+	rtcpReceivingSessionMap.clear();
 #endif
 #if RTC_ENABLE_WEBSOCKET
 	count += webSocketMap.size() + webSocketServerMap.size();
@@ -168,6 +171,7 @@ void eraseChannel(int id) {
 #if RTC_ENABLE_MEDIA
 		rtcpSrReporterMap.erase(id);
 		rtpConfigMap.erase(id);
+		rtcpReceivingSessionMap.erase(id);
 #endif
 		return;
 	}
@@ -263,6 +267,20 @@ void emplaceRtpConfig(shared_ptr<RtpPacketizationConfig> ptr, int tr) {
 	rtpConfigMap.emplace(std::make_pair(tr, ptr));
 }
 
+shared_ptr<RtcpReceivingSession> getRtcpReceivingSession(int tr) {
+	std::lock_guard lock(mutex);
+	if (auto it = rtcpReceivingSessionMap.find(tr); it != rtcpReceivingSessionMap.end()) {
+		return it->second;
+	} else {
+		throw std::invalid_argument("RTCP receiving session ID does not exist");
+	}
+}
+
+void emplaceRtcpReceivingSession(shared_ptr<RtcpReceivingSession> ptr, int tr) {
+	std::lock_guard lock(mutex);
+	rtcpReceivingSessionMap.emplace(std::make_pair(tr, ptr));
+}
+
 shared_ptr<RtpPacketizationConfig>
 createRtpPacketizationConfig(const rtcPacketizationHandlerInit *init) {
 	if (!init)
@@ -275,6 +293,16 @@ createRtpPacketizationConfig(const rtcPacketizationHandlerInit *init) {
 	                                                       init->payloadType, init->clockRate);
 	config->sequenceNumber = init->sequenceNumber;
 	config->timestamp = init->timestamp;
+	config->playoutDelayId = init->playoutDelayId;
+	config->playoutDelayMin = init->playoutDelayMin;
+	config->playoutDelayMax = init->playoutDelayMax;
+	config->colorSpaceId = init->colorSpaceId;
+	config->colorChromaSitingHorz = init->colorChromaSitingHorz;
+	config->colorChromaSitingVert = init->colorChromaSitingVert;
+	config->colorRange = init->colorRange;
+	config->colorPrimaries = init->colorPrimaries;
+	config->colorTransfer = init->colorTransfer;
+	config->colorMatrix = init->colorMatrix;
 	return config;
 }
 
@@ -400,6 +428,12 @@ int rtcCreatePeerConnection(const rtcConfiguration *config) {
 		}
 
 		c.certificateType = static_cast<CertificateType>(config->certificateType);
+		if (config->certificatePemFile)
+			c.certificatePemFile = string(config->certificatePemFile);
+		if (config->keyPemFile)
+			c.keyPemFile = string(config->keyPemFile);
+		if (config->keyPemPass)
+			c.keyPemPass = string(config->keyPemPass);
 		c.iceTransportPolicy = static_cast<TransportPolicy>(config->iceTransportPolicy);
 		c.enableIceTcp = config->enableIceTcp;
 		c.enableIceUdpMux = config->enableIceUdpMux;
@@ -512,7 +546,7 @@ int rtcSetSignalingStateChangeCallback(int pc, rtcSignalingStateCallbackFunc cb)
 					cb(pc, static_cast<rtcSignalingState>(state), *ptr);
 			});
 		else
-			peerConnection->onGatheringStateChange(nullptr);
+			peerConnection->onSignalingStateChange(nullptr);
 		return RTC_ERR_SUCCESS;
 	});
 }
@@ -628,6 +662,24 @@ int rtcGetRemoteDescriptionType(int pc, char *buffer, int size) {
 	});
 }
 
+int rtcCreateOffer(int pc, char *buffer, int size) {
+	return wrap([&] {
+		auto peerConnection = getPeerConnection(pc);
+
+		auto desc = peerConnection->createOffer();
+		return copyAndReturn(string(desc), buffer, size);
+	});
+}
+
+int rtcCreateAnswer(int pc, char *buffer, int size) {
+	return wrap([&] {
+		auto peerConnection = getPeerConnection(pc);
+
+		auto desc = peerConnection->createAnswer();
+		return copyAndReturn(string(desc), buffer, size);
+	});
+}
+
 int rtcGetLocalAddress(int pc, char *buffer, int size) {
 	return wrap([&] {
 		auto peerConnection = getPeerConnection(pc);
@@ -669,6 +721,11 @@ int rtcGetSelectedCandidatePair(int pc, char *local, int localSize, char *remote
 
 		return std::max(localRet, remoteRet);
 	});
+}
+
+bool rtcIsNegotiationNeeded(int pc) {
+	return wrap([&] { return getPeerConnection(pc)->negotiationNeeded() ? 0 : 1; }) == 0 ? true
+	                                                                                     : false;
 }
 
 int rtcGetMaxDataChannelStream(int pc) {
@@ -902,7 +959,8 @@ int rtcCreateDataChannelEx(int pc, const char *label, const rtcDataChannelInit *
 			dci.reliability.unordered = reliability->unordered;
 			if (reliability->unreliable) {
 				if (reliability->maxPacketLifeTime > 0)
-					dci.reliability.maxPacketLifeTime.emplace(milliseconds(reliability->maxPacketLifeTime));
+					dci.reliability.maxPacketLifeTime.emplace(
+					    milliseconds(reliability->maxPacketLifeTime));
 				else
 					dci.reliability.maxRetransmits.emplace(reliability->maxRetransmits);
 			}
@@ -966,9 +1024,10 @@ int rtcGetDataChannelReliability(int dc, rtcReliability *reliability) {
 		Reliability dcr = dataChannel->reliability();
 		std::memset(reliability, 0, sizeof(*reliability));
 		reliability->unordered = dcr.unordered;
-		if(dcr.maxPacketLifeTime) {
+		if (dcr.maxPacketLifeTime) {
 			reliability->unreliable = true;
-			reliability->maxPacketLifeTime = static_cast<unsigned int>(dcr.maxPacketLifeTime->count());
+			reliability->maxPacketLifeTime =
+			    static_cast<unsigned int>(dcr.maxPacketLifeTime->count());
 		} else if (dcr.maxRetransmits) {
 			reliability->unreliable = true;
 			reliability->maxRetransmits = *dcr.maxRetransmits;
@@ -1063,7 +1122,8 @@ int rtcAddTrackEx(int pc, const rtcTrackInit *init) {
 		case RTC_CODEC_OPUS:
 		case RTC_CODEC_PCMU:
 		case RTC_CODEC_PCMA:
-		case RTC_CODEC_AAC: {
+		case RTC_CODEC_AAC:
+		case RTC_CODEC_G722: {
 			auto audio = std::make_unique<Description::Audio>(mid, direction);
 			switch (init->codec) {
 			case RTC_CODEC_OPUS:
@@ -1077,6 +1137,9 @@ int rtcAddTrackEx(int pc, const rtcTrackInit *init) {
 				break;
 			case RTC_CODEC_AAC:
 				audio->addAACCodec(pt, profile);
+				break;
+			case RTC_CODEC_G722:
+				audio->addG722Codec(pt, profile);
 				break;
 			default:
 				break;
@@ -1139,6 +1202,43 @@ int rtcGetTrackDirection(int tr, rtcDirection *direction) {
 	});
 }
 
+int rtcRequestKeyframe(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		track->requestKeyframe();
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcRequestBitrate(int tr, unsigned int bitrate) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		track->requestBitrate(bitrate);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetFrameCallback(int tr, rtcFrameCallbackFunc cb) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		if (cb)
+			track->onFrame([tr, cb](binary data, FrameInfo info) {
+				if (auto ptr = getUserPointer(tr)) {
+					rtcFrameInfo frameInfo;
+					frameInfo.timestamp = info.timestamp;
+					frameInfo.payloadType = info.payloadType;
+					frameInfo.timestampSeconds =
+					    info.timestampSeconds ? info.timestampSeconds->count() : -1.0;
+					cb(tr, reinterpret_cast<const char *>(data.data()), int(data.size()),
+					   &frameInfo, *ptr);
+				}
+			});
+		else
+			track->onFrame(nullptr);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
 #if RTC_ENABLE_MEDIA
 
 void setSSRC(Description::Media *description, uint32_t ssrc, const char *_name, const char *_msid,
@@ -1195,7 +1295,7 @@ int rtcSetMediaInterceptorCallback(int pc, rtcInterceptorCallbackFunc cb) {
 	});
 }
 
-int rtcSetH264PacketizationHandler(int tr, const rtcPacketizationHandlerInit *init) {
+int rtcSetH264Packetizer(int tr, const rtcPacketizerInit *init) {
 	return wrap([&] {
 		auto track = getTrack(tr);
 		// create RTP configuration
@@ -1203,8 +1303,8 @@ int rtcSetH264PacketizationHandler(int tr, const rtcPacketizationHandlerInit *in
 		emplaceRtpConfig(rtpConfig, tr);
 		// create packetizer
 		auto nalSeparator = init ? init->nalSeparator : RTC_NAL_SEPARATOR_LENGTH;
-		auto maxFragmentSize = init && init->maxFragmentSize ? init->maxFragmentSize
-		                                                     : RTC_DEFAULT_MAXIMUM_FRAGMENT_SIZE;
+		auto maxFragmentSize =
+		    init && init->maxFragmentSize ? init->maxFragmentSize : RTC_DEFAULT_MAX_FRAGMENT_SIZE;
 		auto packetizer = std::make_shared<H264RtpPacketizer>(
 		    static_cast<rtc::NalUnit::Separator>(nalSeparator), rtpConfig, maxFragmentSize);
 		track->setMediaHandler(packetizer);
@@ -1212,15 +1312,16 @@ int rtcSetH264PacketizationHandler(int tr, const rtcPacketizationHandlerInit *in
 	});
 }
 
-int rtcSetH265PacketizationHandler(int tr, const rtcPacketizationHandlerInit *init) {
+int rtcSetH265Packetizer(int tr, const rtcPacketizerInit *init) {
 	return wrap([&] {
 		auto track = getTrack(tr);
 		// create RTP configuration
 		auto rtpConfig = createRtpPacketizationConfig(init);
+		emplaceRtpConfig(rtpConfig, tr);
 		// create packetizer
 		auto nalSeparator = init ? init->nalSeparator : RTC_NAL_SEPARATOR_LENGTH;
-		auto maxFragmentSize = init && init->maxFragmentSize ? init->maxFragmentSize
-		                                                     : RTC_DEFAULT_MAXIMUM_FRAGMENT_SIZE;
+		auto maxFragmentSize =
+		    init && init->maxFragmentSize ? init->maxFragmentSize : RTC_DEFAULT_MAX_FRAGMENT_SIZE;
 		auto packetizer = std::make_shared<H265RtpPacketizer>(
 		    static_cast<rtc::NalUnit::Separator>(nalSeparator), rtpConfig, maxFragmentSize);
 		track->setMediaHandler(packetizer);
@@ -1228,14 +1329,15 @@ int rtcSetH265PacketizationHandler(int tr, const rtcPacketizationHandlerInit *in
 	});
 }
 
-int rtcSetAV1PacketizationHandler(int tr, const rtcPacketizationHandlerInit *init) {
+int rtcSetAV1Packetizer(int tr, const rtcPacketizerInit *init) {
 	return wrap([&] {
 		auto track = getTrack(tr);
 		// create RTP configuration
 		auto rtpConfig = createRtpPacketizationConfig(init);
+		emplaceRtpConfig(rtpConfig, tr);
 		// create packetizer
-		auto maxFragmentSize = init && init->maxFragmentSize ? init->maxFragmentSize
-		                                                     : RTC_DEFAULT_MAXIMUM_FRAGMENT_SIZE;
+		auto maxFragmentSize =
+		    init && init->maxFragmentSize ? init->maxFragmentSize : RTC_DEFAULT_MAX_FRAGMENT_SIZE;
 		auto packetization = init->obuPacketization == RTC_OBU_PACKETIZED_TEMPORAL_UNIT
 		                         ? AV1RtpPacketizer::Packetization::TemporalUnit
 		                         : AV1RtpPacketizer::Packetization::Obu;
@@ -1246,7 +1348,37 @@ int rtcSetAV1PacketizationHandler(int tr, const rtcPacketizationHandlerInit *ini
 	});
 }
 
-int rtcSetOpusPacketizationHandler(int tr, const rtcPacketizationHandlerInit *init) {
+int rtcSetVP8Packetizer(int tr, const rtcPacketizerInit *init) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		// create RTP configuration
+		auto rtpConfig = createRtpPacketizationConfig(init);
+		emplaceRtpConfig(rtpConfig, tr);
+		// create packetizer
+		auto maxFragmentSize =
+		    init && init->maxFragmentSize ? init->maxFragmentSize : RTC_DEFAULT_MAX_FRAGMENT_SIZE;
+		auto packetizer = std::make_shared<VP8RtpPacketizer>(rtpConfig, maxFragmentSize);
+		track->setMediaHandler(packetizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetVP9Packetizer(int tr, const rtcPacketizerInit *init) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		// create RTP configuration
+		auto rtpConfig = createRtpPacketizationConfig(init);
+		emplaceRtpConfig(rtpConfig, tr);
+		// create packetizer
+		auto maxFragmentSize =
+		    init && init->maxFragmentSize ? init->maxFragmentSize : RTC_DEFAULT_MAX_FRAGMENT_SIZE;
+		auto packetizer = std::make_shared<VP9RtpPacketizer>(rtpConfig, maxFragmentSize);
+		track->setMediaHandler(packetizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetOpusPacketizer(int tr, const rtcPacketizerInit *init) {
 	return wrap([&] {
 		auto track = getTrack(tr);
 		// create RTP configuration
@@ -1259,14 +1391,147 @@ int rtcSetOpusPacketizationHandler(int tr, const rtcPacketizationHandlerInit *in
 	});
 }
 
-int rtcSetAACPacketizationHandler(int tr, const rtcPacketizationHandlerInit *init) {
+int rtcSetAACPacketizer(int tr, const rtcPacketizerInit *init) {
 	return wrap([&] {
 		auto track = getTrack(tr);
 		// create RTP configuration
 		auto rtpConfig = createRtpPacketizationConfig(init);
+		emplaceRtpConfig(rtpConfig, tr);
 		// create packetizer
 		auto packetizer = std::make_shared<AACRtpPacketizer>(rtpConfig);
 		track->setMediaHandler(packetizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetPCMUPacketizer(int tr, const rtcPacketizerInit *init) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		// create RTP configuration
+		auto rtpConfig = createRtpPacketizationConfig(init);
+		emplaceRtpConfig(rtpConfig, tr);
+		// create packetizer
+		auto packetizer = std::make_shared<PCMURtpPacketizer>(rtpConfig);
+		track->setMediaHandler(packetizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetPCMAPacketizer(int tr, const rtcPacketizerInit *init) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		// create RTP configuration
+		auto rtpConfig = createRtpPacketizationConfig(init);
+		emplaceRtpConfig(rtpConfig, tr);
+		// create packetizer
+		auto packetizer = std::make_shared<PCMARtpPacketizer>(rtpConfig);
+		track->setMediaHandler(packetizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetG722Packetizer(int tr, const rtcPacketizerInit *init) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		// create RTP configuration
+		auto rtpConfig = createRtpPacketizationConfig(init);
+		emplaceRtpConfig(rtpConfig, tr);
+		// create packetizer
+		auto packetizer = std::make_shared<G722RtpPacketizer>(rtpConfig);
+		track->setMediaHandler(packetizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetH264Depacketizer(int tr, rtcNalUnitSeparator nalSeparator) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<H264RtpDepacketizer>(
+		    static_cast<rtc::NalUnit::Separator>(nalSeparator));
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetH265Depacketizer(int tr, rtcNalUnitSeparator nalSeparator) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<H265RtpDepacketizer>(
+		    static_cast<rtc::NalUnit::Separator>(nalSeparator));
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetVP8Depacketizer(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<VP8RtpDepacketizer>();
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetVP9Depacketizer(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<VP9RtpDepacketizer>();
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetOpusDepacketizer(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<OpusRtpDepacketizer>();
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetAACDepacketizer(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<AACRtpDepacketizer>();
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetPCMUDepacketizer(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<PCMURtpDepacketizer>();
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetPCMADepacketizer(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<PCMARtpDepacketizer>();
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcSetG722Depacketizer(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto depacketizer = std::make_shared<G722RtpDepacketizer>();
+		track->setMediaHandler(depacketizer);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcChainRtcpReceivingSession(int tr) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto session = std::make_shared<rtc::RtcpReceivingSession>();
+		track->chainMediaHandler(session);
+		emplaceRtcpReceivingSession(session, tr);
 		return RTC_ERR_SUCCESS;
 	});
 }
@@ -1298,6 +1563,27 @@ int rtcChainPliHandler(int tr, rtcPliHandlerCallbackFunc cb) {
 			if (auto ptr = getUserPointer(tr))
 				cb(tr, *ptr);
 		});
+		track->chainMediaHandler(handler);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcChainRembHandler(int tr, rtcRembHandlerCallbackFunc cb) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto handler = std::make_shared<RembHandler>([tr, cb](unsigned int bitrate) {
+			if (auto ptr = getUserPointer(tr))
+				cb(tr, bitrate, *ptr);
+		});
+		track->chainMediaHandler(handler);
+		return RTC_ERR_SUCCESS;
+	});
+}
+
+int rtcChainPacingHandler(int tr, double bitsPerSecond, int sendIntervalMs) {
+	return wrap([&] {
+		auto track = getTrack(tr);
+		auto handler = std::make_shared<PacingHandler>(bitsPerSecond, milliseconds(sendIntervalMs));
 		track->chainMediaHandler(handler);
 		return RTC_ERR_SUCCESS;
 	});
@@ -1351,10 +1637,14 @@ int rtcGetLastTrackSenderReportTimestamp(int id, uint32_t *timestamp) {
 	});
 }
 
-int rtcSetNeedsToSendRtcpSr(int id) {
-	return wrap([id] {
-		auto sender = getRtcpSrReporter(id);
-		sender->setNeedsToReport();
+int rtcGetTrackRtcpSyncTimestamps(int tr, uint64_t *rtpTimestamp, uint64_t *ntpTimestamp) {
+	return wrap([&] {
+		auto session = getRtcpReceivingSession(tr);
+		auto timestamps = session->getSyncTimestamps();
+		if (rtpTimestamp)
+			*rtpTimestamp = timestamps.rtpTimestamp;
+		if (ntpTimestamp)
+			*ntpTimestamp = timestamps.ntpTimestamp;
 		return RTC_ERR_SUCCESS;
 	});
 }
@@ -1400,7 +1690,7 @@ int rtcGetSsrcsForType(const char *mediaType, const char *sdp, uint32_t *buffer,
 		auto oldSDP = string(sdp);
 		auto description = Description(oldSDP, "unspec");
 		auto mediaCount = description.mediaCount();
-		for (unsigned int i = 0; i < mediaCount; i++) {
+		for (int i = 0; i < mediaCount; i++) {
 			if (std::holds_alternative<Description::Media *>(description.media(i))) {
 				auto media = std::get<Description::Media *>(description.media(i));
 				auto currentMediaType = lowercased(media->type());
@@ -1421,7 +1711,7 @@ int rtcSetSsrcForType(const char *mediaType, const char *sdp, char *buffer, cons
 		auto prevSDP = string(sdp);
 		auto description = Description(prevSDP, "unspec");
 		auto mediaCount = description.mediaCount();
-		for (unsigned int i = 0; i < mediaCount; i++) {
+		for (int i = 0; i < mediaCount; i++) {
 			if (std::holds_alternative<Description::Media *>(description.media(i))) {
 				auto media = std::get<Description::Media *>(description.media(i));
 				auto currentMediaType = lowercased(media->type());
@@ -1433,6 +1723,11 @@ int rtcSetSsrcForType(const char *mediaType, const char *sdp, char *buffer, cons
 		}
 		return copyAndReturn(string(description), buffer, bufferSize);
 	});
+}
+
+int rtcSetNeedsToSendRtcpSr(int) {
+	// Dummy
+	return RTC_ERR_SUCCESS;
 }
 
 #endif // RTC_ENABLE_MEDIA
@@ -1464,6 +1759,11 @@ int rtcCreateWebSocketEx(const char *url, const rtcWsConfiguration *config) {
 		for (int i = 0; i < config->protocolsCount; ++i)
 			c.protocols.emplace_back(string(config->protocols[i]));
 
+		if (config->tcpConnectionTimeoutMs > 0)
+			c.tcpConnectionTimeout = milliseconds(config->tcpConnectionTimeoutMs);
+		else if (config->tcpConnectionTimeoutMs < 0)
+			c.tcpConnectionTimeout = milliseconds::zero(); // setting to 0 disables,
+			                                            // not setting keeps default
 		if (config->connectionTimeoutMs > 0)
 			c.connectionTimeout = milliseconds(config->connectionTimeoutMs);
 		else if (config->connectionTimeoutMs < 0)
@@ -1478,6 +1778,9 @@ int rtcCreateWebSocketEx(const char *url, const rtcWsConfiguration *config) {
 			c.maxOutstandingPings = config->maxOutstandingPings;
 		else if (config->maxOutstandingPings < 0)
 			c.maxOutstandingPings = 0; // setting to 0 disables, not setting keeps default
+
+		if (config->maxMessageSize > 0)
+			c.maxMessageSize = size_t(config->maxMessageSize);
 
 		auto webSocket = std::make_shared<WebSocket>(std::move(c));
 		webSocket->open(url);
@@ -1515,8 +1818,8 @@ int rtcGetWebSocketPath(int ws, char *buffer, int size) {
 	});
 }
 
-RTC_C_EXPORT int rtcCreateWebSocketServer(const rtcWsServerConfiguration *config,
-                                          rtcWebSocketClientCallbackFunc cb) {
+int rtcCreateWebSocketServer(const rtcWsServerConfiguration *config,
+                             rtcWebSocketClientCallbackFunc cb) {
 	return wrap([&] {
 		if (!config)
 			throw std::invalid_argument("Unexpected null pointer for config");
@@ -1533,6 +1836,10 @@ RTC_C_EXPORT int rtcCreateWebSocketServer(const rtcWsServerConfiguration *config
 		c.keyPemFile = config->keyPemFile ? make_optional(string(config->keyPemFile)) : nullopt;
 		c.keyPemPass = config->keyPemPass ? make_optional(string(config->keyPemPass)) : nullopt;
 		c.bindAddress = config->bindAddress ? make_optional(string(config->bindAddress)) : nullopt;
+
+		if (config->maxMessageSize > 0)
+			c.maxMessageSize = size_t(config->maxMessageSize);
+
 		auto webSocketServer = std::make_shared<WebSocketServer>(std::move(c));
 		int wsserver = emplaceWebSocketServer(webSocketServer);
 
@@ -1548,7 +1855,7 @@ RTC_C_EXPORT int rtcCreateWebSocketServer(const rtcWsServerConfiguration *config
 	});
 }
 
-RTC_C_EXPORT int rtcDeleteWebSocketServer(int wsserver) {
+int rtcDeleteWebSocketServer(int wsserver) {
 	return wrap([&] {
 		auto webSocketServer = getWebSocketServer(wsserver);
 		webSocketServer->onClient(nullptr);
@@ -1558,7 +1865,7 @@ RTC_C_EXPORT int rtcDeleteWebSocketServer(int wsserver) {
 	});
 }
 
-RTC_C_EXPORT int rtcGetWebSocketServerPort(int wsserver) {
+int rtcGetWebSocketServerPort(int wsserver) {
 	return wrap([&] {
 		auto webSocketServer = getWebSocketServer(wsserver);
 		return int(webSocketServer->port());
@@ -1567,28 +1874,11 @@ RTC_C_EXPORT int rtcGetWebSocketServerPort(int wsserver) {
 
 #endif
 
-void rtcPreload() {
-	try {
-		rtc::Preload();
-	} catch (const std::exception &e) {
-		PLOG_ERROR << e.what();
-	}
-}
-
-void rtcCleanup() {
-	try {
-		size_t count = eraseAll();
-		if (count != 0) {
-			PLOG_INFO << count << " objects were not properly destroyed before cleanup";
-		}
-
-		if (rtc::Cleanup().wait_for(10s) == std::future_status::timeout)
-			throw std::runtime_error(
-			    "Cleanup timeout (possible deadlock or undestructible object)");
-
-	} catch (const std::exception &e) {
-		PLOG_ERROR << e.what();
-	}
+int rtcSetThreadPoolSize(unsigned int count) {
+	return wrap([&] {
+		SetThreadPoolSize(count);
+		return RTC_ERR_SUCCESS;
+	});
 }
 
 int rtcSetSctpSettings(const rtcSctpSettings *settings) {
@@ -1639,3 +1929,29 @@ int rtcSetSctpSettings(const rtcSctpSettings *settings) {
 		return RTC_ERR_SUCCESS;
 	});
 }
+
+bool rtcPreload() {
+	try {
+		return rtc::Preload();
+	} catch (const std::exception &e) {
+		PLOG_ERROR << e.what();
+		return false;
+	}
+}
+
+void rtcCleanup() {
+	try {
+		size_t count = eraseAll();
+		if (count != 0) {
+			PLOG_INFO << count << " objects were not properly destroyed before cleanup";
+		}
+
+		if (rtc::Cleanup().wait_for(10s) == std::future_status::timeout)
+			throw std::runtime_error(
+			    "Cleanup timeout (possible deadlock or undestructible object)");
+
+	} catch (const std::exception &e) {
+		PLOG_ERROR << e.what();
+	}
+}
+

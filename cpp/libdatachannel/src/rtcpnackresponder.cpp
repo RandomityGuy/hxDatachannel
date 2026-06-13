@@ -12,15 +12,71 @@
 #include "rtp.hpp"
 
 #include "impl/internals.hpp"
+#include "impl/utils.hpp"
 
 #include <cassert>
+#include <cstring>
+#include <functional>
+#include <random>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#endif
 
 namespace rtc {
 
+namespace utils = impl::utils;
+
 RtcpNackResponder::RtcpNackResponder(size_t maxSize)
-    : mStorage(std::make_shared<Storage>(maxSize)) {}
+    : mStorage(std::make_shared<Storage>(maxSize)) {
+	auto uniform = std::bind(std::uniform_int_distribution<uint32_t>(), utils::random_engine());
+	mRtxSequenceNumber = static_cast<uint16_t>(uniform());
+}
+
+void RtcpNackResponder::media(const Description::Media &desc) {
+	bool newRtxEnabled = false;
+	optional<SSRC> newRtxSsrc;
+	std::unordered_map<int, int> newRtxPayloadTypeMap;
+
+	if (desc.isRtxEnabled()) {
+		auto pts = desc.payloadTypes();
+
+		// Find RTX SSRC (shared across all codecs in the media section)
+		auto ssrcs = desc.getSSRCs();
+		for (auto ssrc : ssrcs) {
+			auto rtxSsrc = desc.getRtxSsrcForSsrc(ssrc);
+			if (rtxSsrc) {
+				newRtxSsrc = *rtxSsrc;
+				break;
+			}
+		}
+
+		// Build mapping from each primary PT to its RTX PT
+		for (int pt : pts) {
+			auto rtxPt = desc.getRtxPayloadType(pt);
+			if (rtxPt) {
+				newRtxPayloadTypeMap[pt] = *rtxPt;
+			}
+		}
+
+		newRtxEnabled = newRtxSsrc.has_value() && !newRtxPayloadTypeMap.empty();
+	}
+
+	std::lock_guard lock(mMutex);
+	mRtxEnabled = newRtxEnabled;
+	mRtxPayloadTypeMap = std::move(newRtxPayloadTypeMap);
+	mRtxSsrc = newRtxSsrc;
+}
 
 void RtcpNackResponder::incoming(message_vector &messages, const message_callback &send) {
+	bool rtxEnabled;
+	{
+		std::lock_guard lock(mMutex);
+		rtxEnabled = mRtxEnabled;
+	}
+
 	for (const auto &message : messages) {
 		if (message->type != Message::Control)
 			continue;
@@ -47,8 +103,17 @@ void RtcpNackResponder::incoming(message_vector &messages, const message_callbac
 			}
 
 			for (auto sequenceNumber : missingSequenceNumbers) {
-				if (auto optPacket = mStorage->get(sequenceNumber))
-					send(make_message(*optPacket.value()));
+				if (auto packet = mStorage->get(sequenceNumber)) {
+					if (rtxEnabled) {
+						// RTX sender mode: wrap in RTX before sending
+						auto rtxPacket = wrapInRtx(packet);
+						if (rtxPacket)
+							send(rtxPacket);
+					} else {
+						// Plain retransmission
+						send(packet);
+					}
+				}
 			}
 		}
 	}
@@ -61,7 +126,58 @@ void RtcpNackResponder::outgoing(message_vector &messages,
 			mStorage->store(message);
 }
 
-RtcpNackResponder::Storage::Element::Element(binary_ptr packet, uint16_t sequenceNumber,
+message_ptr RtcpNackResponder::wrapInRtx(const message_ptr &original) {
+	if (!original || original->size() < sizeof(RtpHeader))
+		return nullptr;
+
+	auto origRtp = reinterpret_cast<const RtpHeader *>(original->data());
+	int origPt = origRtp->payloadType();
+
+	optional<SSRC> rtxSsrc;
+	optional<int> rtxPayloadType;
+	{
+		std::lock_guard lock(mMutex);
+		rtxSsrc = mRtxSsrc;
+		auto it = mRtxPayloadTypeMap.find(origPt);
+		if (it != mRtxPayloadTypeMap.end())
+			rtxPayloadType = it->second;
+	}
+
+	if (!rtxSsrc || !rtxPayloadType)
+		return nullptr;
+	size_t headerSize =
+	    static_cast<size_t>(origRtp->getBody() - reinterpret_cast<const char *>(origRtp));
+	size_t origPayloadSize = original->size() - headerSize;
+
+	// RTX packet = original header (modified) + 2-byte OSN + original payload
+	size_t rtxSize = headerSize + sizeof(uint16_t) + origPayloadSize;
+	auto rtxMessage = std::make_shared<Message>(rtxSize, Message::Binary);
+
+	// Copy the original RTP header
+	std::memcpy(rtxMessage->data(), original->data(), headerSize);
+
+	auto rtxRtp = reinterpret_cast<RtpHeader *>(rtxMessage->data());
+
+	// Modify header for RTX
+	rtxRtp->setSsrc(*rtxSsrc);
+	rtxRtp->setPayloadType(*rtxPayloadType);
+	rtxRtp->setSeqNumber(mRtxSequenceNumber++);
+	// Timestamp stays the same per RFC 4588 Section 4
+
+	// Write the 2-byte Original Sequence Number
+	uint16_t osn = htons(origRtp->seqNumber());
+	std::memcpy(rtxMessage->data() + headerSize, &osn, sizeof(uint16_t));
+
+	// Copy original payload
+	if (origPayloadSize > 0)
+		std::memcpy(rtxMessage->data() + headerSize + sizeof(uint16_t),
+		            original->data() + headerSize, origPayloadSize);
+
+	rtxMessage->stream = *rtxSsrc;
+	return rtxMessage;
+}
+
+RtcpNackResponder::Storage::Element::Element(message_ptr packet, uint16_t sequenceNumber,
                                              shared_ptr<Element> next)
     : packet(packet), sequenceNumber(sequenceNumber), next(next) {}
 
@@ -72,14 +188,14 @@ RtcpNackResponder::Storage::Storage(size_t _maxSize) : maxSize(_maxSize) {
 	storage.reserve(maxSize);
 }
 
-optional<binary_ptr> RtcpNackResponder::Storage::get(uint16_t sequenceNumber) {
+message_ptr RtcpNackResponder::Storage::get(uint16_t sequenceNumber) {
 	std::lock_guard lock(mutex);
 	auto position = storage.find(sequenceNumber);
-	return position != storage.end() ? std::make_optional(storage.at(sequenceNumber)->packet)
-	                                 : nullopt;
+	return position != storage.end() ? storage.at(sequenceNumber)->packet
+	                                 : nullptr;
 }
 
-void RtcpNackResponder::Storage::store(binary_ptr packet) {
+void RtcpNackResponder::Storage::store(message_ptr packet) {
 	if (!packet || packet->size() < sizeof(RtpHeader))
 		return;
 

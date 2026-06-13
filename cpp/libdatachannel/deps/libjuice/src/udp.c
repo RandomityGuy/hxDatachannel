@@ -44,46 +44,14 @@ static uint16_t get_next_port_in_range(uint16_t begin, uint16_t end) {
 	return next;
 }
 
-socket_t udp_create_socket(const udp_socket_config_t *config) {
-	socket_t sock = INVALID_SOCKET;
-
-	// Obtain local Address
-	struct addrinfo *ai_list = NULL;
-	struct addrinfo hints;
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_protocol = IPPROTO_UDP;
-	hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
-	if (getaddrinfo(config->bind_address, "0", &hints, &ai_list) != 0) {
-		JLOG_ERROR("getaddrinfo for binding address failed, errno=%d", sockerrno);
+static socket_t create_socket_for_addrinfo(const udp_socket_config_t *config,
+                                           const struct addrinfo *ai) {
+	// Create socket
+	socket_t sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+	if (sock == INVALID_SOCKET) {
+		JLOG_WARN("UDP socket creation failed, errno=%d", sockerrno);
 		return INVALID_SOCKET;
 	}
-
-	// Create socket
-	struct addrinfo *ai = NULL;
-	const int families[2] = {AF_INET6, AF_INET}; // Prefer IPv6
-	const char *names[2] = {"IPv6", "IPv4"};
-	for (int i = 0; i < 2; ++i) {
-		ai = find_family(ai_list, families[i]);
-		if (!ai)
-			continue;
-
-		sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-		if (sock == INVALID_SOCKET) {
-			JLOG_WARN("UDP socket creation for %s family failed, errno=%d", names[i], sockerrno);
-			continue;
-		}
-
-		break;
-	}
-
-	if (sock == INVALID_SOCKET) {
-		JLOG_ERROR("UDP socket creation failed: no suitable address family");
-		goto error;
-	}
-
-	assert(ai != NULL);
 
 	// Listen on both IPv6 and IPv4
 	const sockopt_t disabled = 0;
@@ -126,11 +94,10 @@ socket_t udp_create_socket(const udp_socket_config_t *config) {
 		if (bind(sock, ai->ai_addr, (socklen_t)ai->ai_addrlen) == 0) {
 			JLOG_DEBUG("UDP socket bound to %s:%hu",
 			           config->bind_address ? config->bind_address : "any", udp_get_port(sock));
-			freeaddrinfo(ai_list);
 			return sock;
 		}
 
-		JLOG_ERROR("UDP socket binding failed, errno=%d", sockerrno);
+		JLOG_WARN("UDP socket binding failed, errno=%d", sockerrno);
 
 	} else if (config->port_begin == config->port_end) {
 		uint16_t port = config->port_begin;
@@ -142,11 +109,10 @@ socket_t udp_create_socket(const udp_socket_config_t *config) {
 		if (bind(sock, (struct sockaddr *)&addr, addrlen) == 0) {
 			JLOG_DEBUG("UDP socket bound to %s:%hu",
 			           config->bind_address ? config->bind_address : "any", port);
-			freeaddrinfo(ai_list);
 			return sock;
 		}
 
-		JLOG_ERROR("UDP socket binding failed on port %hu, errno=%d", port, sockerrno);
+		JLOG_WARN("UDP socket binding failed on port %hu, errno=%d", port, sockerrno);
 
 	} else {
 		struct sockaddr_storage addr;
@@ -160,27 +126,60 @@ socket_t udp_create_socket(const udp_socket_config_t *config) {
 			if (bind(sock, (struct sockaddr *)&addr, addrlen) == 0) {
 				JLOG_DEBUG("UDP socket bound to %s:%hu",
 				           config->bind_address ? config->bind_address : "any", port);
-				freeaddrinfo(ai_list);
 				return sock;
 			}
 		} while ((sockerrno == SEADDRINUSE || sockerrno == SEACCES) && retries-- > 0);
 
-		JLOG_ERROR("UDP socket binding failed on port range %s:[%hu,%hu], errno=%d",
-		           config->bind_address ? config->bind_address : "any", config->port_begin,
-		           config->port_end, sockerrno);
+		JLOG_WARN("UDP socket binding failed on port range %s:[%hu,%hu], errno=%d",
+		          config->bind_address ? config->bind_address : "any", config->port_begin,
+		          config->port_end, sockerrno);
 	}
 
 error:
-	freeaddrinfo(ai_list);
 	if (sock != INVALID_SOCKET)
 		closesocket(sock);
 
 	return INVALID_SOCKET;
 }
 
+socket_t udp_create_socket(const udp_socket_config_t *config) {
+	// Obtain local Address
+	struct addrinfo *ai_list = NULL;
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_protocol = IPPROTO_UDP;
+	hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
+	if (getaddrinfo(config->bind_address, "0", &hints, &ai_list) != 0) {
+		JLOG_ERROR("getaddrinfo for binding address failed, errno=%d", sockerrno);
+		return INVALID_SOCKET;
+	}
+
+	const int families[2] = {AF_INET6, AF_INET}; // Prefer IPv6
+	const char *names[2] = {"IPv6", "IPv4"};
+	for (int i = 0; i < 2; ++i) {
+		const struct addrinfo *ai = find_family(ai_list, families[i]);
+		if (!ai)
+			continue;
+
+		JLOG_DEBUG("Opening UDP socket for %s family", names[i]);
+		socket_t sock = create_socket_for_addrinfo(config, ai);
+		if (sock != INVALID_SOCKET) {
+			freeaddrinfo(ai_list);
+			return sock;
+		}
+	}
+
+	JLOG_ERROR("UDP socket opening failed");
+	freeaddrinfo(ai_list);
+	return INVALID_SOCKET;
+}
+
 int udp_recvfrom(socket_t sock, char *buffer, size_t size, addr_record_t *src) {
 	while (true) {
 		src->len = sizeof(src->addr);
+		src->socktype = SOCK_DGRAM;
 		int len =
 		    recvfrom(sock, buffer, (socklen_t)size, 0, (struct sockaddr *)&src->addr, &src->len);
 		if (len >= 0) {
@@ -207,6 +206,7 @@ int udp_sendto(socket_t sock, const char *data, size_t size, const addr_record_t
 	addr_record_t tmp = *dst;
 	addr_record_t name;
 	name.len = sizeof(name.addr);
+	name.socktype = SOCK_DGRAM;
 	if (getsockname(sock, (struct sockaddr *)&name.addr, &name.len) == 0) {
 		if (name.addr.ss_family == AF_INET6)
 			addr_map_inet6_v4mapped(&tmp.addr, &tmp.len);
@@ -258,6 +258,7 @@ int udp_set_diffserv(socket_t sock, int ds) {
 #else
 	addr_record_t name;
 	name.len = sizeof(name.addr);
+	name.socktype = SOCK_DGRAM;
 	if (getsockname(sock, (struct sockaddr *)&name.addr, &name.len) < 0) {
 		JLOG_WARN("getsockname failed, errno=%d", sockerrno);
 		return -1;
@@ -306,6 +307,7 @@ uint16_t udp_get_port(socket_t sock) {
 
 int udp_get_bound_addr(socket_t sock, addr_record_t *record) {
 	record->len = sizeof(record->addr);
+	record->socktype = SOCK_DGRAM;
 	if (getsockname(sock, (struct sockaddr *)&record->addr, &record->len)) {
 		JLOG_WARN("getsockname failed, errno=%d", sockerrno);
 		return -1;
@@ -337,6 +339,7 @@ int udp_get_local_addr(socket_t sock, int family_hint, addr_record_t *record) {
 		sin->sin_family = AF_INET;
 		sin->sin_port = htons(port);
 		record->len = sizeof(*sin);
+		record->socktype = SOCK_DGRAM;
 	}
 
 	switch (record->addr.ss_family) {
@@ -467,7 +470,7 @@ int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count) {
 	addr_record_t *end = records + count;
 	int ret = 0;
 
-#if JUICE_ENABLE_LOCALHOST_ADDRESS
+#if defined(JUICE_ENABLE_LOCALHOST_ADDRESS) && JUICE_ENABLE_LOCALHOST_ADDRESS
 	// Add localhost for test purposes
 	addr_record_t local;
 	if (bound.addr.ss_family == AF_INET6 && udp_get_local_addr(sock, AF_INET6, &local) == 0) {
@@ -506,6 +509,7 @@ int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count) {
 				if (current != end) {
 					memcpy(&current->addr, sa, len);
 					current->len = len;
+					current->socktype = SOCK_DGRAM;
 					addr_unmap_inet6_v4mapped((struct sockaddr *)&current->addr, &current->len);
 					addr_set_port((struct sockaddr *)&current->addr, port);
 					++current;
@@ -539,6 +543,7 @@ int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count) {
 				if (current != end) {
 					memcpy(&current->addr, sa, len);
 					current->len = len;
+					current->socktype = SOCK_DGRAM;
 					addr_set_port((struct sockaddr *)&current->addr, port);
 					++current;
 				}
@@ -577,6 +582,7 @@ int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count) {
 				if (current != end) {
 					memcpy(&current->addr, sa, len);
 					current->len = len;
+					current->socktype = SOCK_DGRAM;
 					addr_set_port((struct sockaddr *)&current->addr, port);
 					++current;
 				}
@@ -592,6 +598,7 @@ int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count) {
 				if (current != end) {
 					memcpy(&current->addr, &sin6, sizeof(sin6));
 					current->len = sizeof(sin6);
+					current->socktype = SOCK_DGRAM;
 					++current;
 				}
 			}

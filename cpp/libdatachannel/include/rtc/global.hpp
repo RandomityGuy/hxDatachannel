@@ -17,6 +17,10 @@
 
 namespace rtc {
 
+#ifdef None
+#undef None
+#endif
+
 enum class LogLevel { // Don't change, it must match plog severity
 	None = 0,
 	Fatal = 1,
@@ -31,8 +35,7 @@ typedef std::function<void(LogLevel level, string message)> LogCallback;
 
 RTC_CPP_EXPORT void InitLogger(LogLevel level, LogCallback callback = nullptr);
 
-RTC_CPP_EXPORT void Preload();
-RTC_CPP_EXPORT std::shared_future<void> Cleanup();
+RTC_CPP_EXPORT void SetThreadPoolSize(unsigned int count); // 0: hardware concurrency
 
 struct SctpSettings {
 	// For the following settings, not set means optimized default
@@ -52,8 +55,12 @@ struct SctpSettings {
 
 RTC_CPP_EXPORT void SetSctpSettings(SctpSettings s);
 
-} // namespace rtc
+// Optional global preload and cleanup
+RTC_CPP_EXPORT bool Preload();
+RTC_CPP_EXPORT std::shared_future<void> Cleanup();
 
-RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, rtc::LogLevel level);
+RTC_CPP_EXPORT std::ostream &operator<<(std::ostream &out, LogLevel level);
+
+} // namespace rtc
 
 #endif

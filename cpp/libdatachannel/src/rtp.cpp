@@ -130,33 +130,59 @@ void RtpExtensionHeader::setHeaderLength(uint16_t headerLength) {
 
 void RtpExtensionHeader::clearBody() { std::memset(getBody(), 0, getSize()); }
 
-void RtpExtensionHeader::writeOneByteHeader(size_t offset, uint8_t id, const byte *value,
-                                            size_t size) {
+size_t RtpExtensionHeader::writeOneByteHeader(size_t offset, uint8_t id, const byte *value,
+                                              size_t size) {
 	if ((id == 0) || (id > 14) || (size == 0) || (size > 16) || ((offset + 1 + size) > getSize()))
-		return;
+		return 0;
 	auto buf = getBody() + offset;
 	buf[0] = id << 4;
 	if (size != 1) {
 		buf[0] |= (uint8_t(size) - 1);
 	}
 	std::memcpy(buf + 1, value, size);
+	return 1 + size;
 }
 
-void RtpExtensionHeader::writeCurrentVideoOrientation(size_t offset, const uint8_t id,
-                                                      uint8_t value) {
+size_t RtpExtensionHeader::writeTwoByteHeader(size_t offset, uint8_t id, const byte *value,
+                                              size_t size) {
+	if ((id == 0) || (size > 255) || ((offset + 2 + size) > getSize()))
+		return 0;
+	auto buf = getBody() + offset;
+	buf[0] = id;
+	buf[1] = uint8_t(size);
+	std::memcpy(buf + 2, value, size);
+	return 2 + size;
+}
+
+size_t RtpExtensionHeader::writeCurrentVideoOrientation(bool twoByteHeader, size_t offset,
+                                                        const uint8_t id, uint8_t value) {
 	auto v = std::byte{value};
-	writeOneByteHeader(offset, id, &v, 1);
+	if (twoByteHeader) {
+		return writeTwoByteHeader(offset, id, &v, 1);
+	} else {
+		return writeOneByteHeader(offset, id, &v, 1);
+	}
+}
+size_t RtpExtensionHeader::writeHeader(bool twoByteHeader, size_t offset, uint8_t id,
+                                       const byte *value, size_t size) {
+	if (twoByteHeader) {
+		return writeTwoByteHeader(offset, id, value, size);
+	} else {
+		return writeOneByteHeader(offset, id, value, size);
+	}
 }
 
 SSRC RtcpReportBlock::getSSRC() const { return ntohl(_ssrc); }
 
-void RtcpReportBlock::preparePacket(SSRC in_ssrc, [[maybe_unused]] unsigned int packetsLost,
-                                    [[maybe_unused]] unsigned int totalPackets,
+void RtcpReportBlock::preparePacket(SSRC in_ssrc, uint8_t fraction,
+                                	uint32_t totalPacketsLost,
                                     uint16_t highestSeqNo, uint16_t seqNoCycles, uint32_t jitter,
                                     uint64_t lastSR_NTP, uint64_t lastSR_DELAY) {
 	setSeqNo(highestSeqNo, seqNoCycles);
 	setJitter(jitter);
 	setSSRC(in_ssrc);
+
+	setPacketsLost(fraction, totalPacketsLost);
 
 	// Middle 32 bits of NTP Timestamp
 	// _lastReport = lastSR_NTP >> 16u;
@@ -170,18 +196,18 @@ void RtcpReportBlock::preparePacket(SSRC in_ssrc, [[maybe_unused]] unsigned int 
 void RtcpReportBlock::setSSRC(SSRC in_ssrc) { _ssrc = htonl(in_ssrc); }
 
 void RtcpReportBlock::setPacketsLost(uint8_t fractionLost,
-                                     unsigned int packetsLostCount) {
+                                     uint32_t packetsLostCount) {
 	_fractionLostAndPacketsLost = htonl((uint32_t(fractionLost) << 24) | (packetsLostCount & 0xFFFFFF));
 }
 
 uint8_t RtcpReportBlock::getFractionLost() const {
 	// Fraction lost is expressed as 8-bit fixed point number
 	// In order to get actual lost percentage divide the result by 256
-	return _fractionLostAndPacketsLost & 0xFF;
+	return (uint8_t) ((ntohl(_fractionLostAndPacketsLost) & 0xFF00000) >> 24);
 }
 
-unsigned int RtcpReportBlock::getPacketsLostCount() const {
-	return ntohl(_fractionLostAndPacketsLost & 0xFFFFFF00);
+uint32_t RtcpReportBlock::getPacketsLostCount() const {
+	return ntohl(_fractionLostAndPacketsLost) & 0x00FFFFFF;
 }
 
 uint16_t RtcpReportBlock::seqNoCycles() const { return ntohs(_seqNoCycles); }
@@ -214,9 +240,8 @@ void RtcpReportBlock::log() const {
 	PLOG_VERBOSE << "RTCP report block: "
 	             << "ssrc="
 	             << ntohl(_ssrc)
-	             // TODO: Implement these reports
-	             //	<< ", fractionLost=" << fractionLost
-	             //	<< ", packetsLost=" << packetsLost
+	             	<< ", fractionLost=" << (uint32_t)getFractionLost()
+	             	<< ", packetsLost=" << getPacketsLostCount()
 	             << ", highestSeqNo=" << highestSeqNo() << ", seqNoCycles=" << seqNoCycles()
 	             << ", jitter=" << jitter() << ", lastSR=" << getNTPOfSR()
 	             << ", lastSRDelay=" << delaySinceSR();
@@ -281,9 +306,19 @@ void RtcpSr::preparePacket(SSRC senderSSRC, uint8_t reportCount) {
 	this->_senderSSRC = htonl(senderSSRC);
 }
 
-const RtcpReportBlock *RtcpSr::getReportBlock(int num) const { return &_reportBlocks + num; }
+const RtcpReportBlock *RtcpSr::getReportBlock(int num) const {
+	if (num < 0 || num >= int((header.lengthInBytes() - 24) / sizeof(RtcpReportBlock)))
+		return nullptr;
 
-RtcpReportBlock *RtcpSr::getReportBlock(int num) { return &_reportBlocks + num; }
+	return &_reportBlocks + num;
+}
+
+RtcpReportBlock *RtcpSr::getReportBlock(int num) {
+	if (num < 0 || num >= int((header.lengthInBytes() - 24) / sizeof(RtcpReportBlock)))
+		return nullptr;
+
+	return &_reportBlocks + num;
+}
 
 size_t RtcpSr::getSize() const {
 	// "length" in packet is one less than the number of 32 bit words in the packet.
@@ -308,9 +343,9 @@ void RtcpSr::log() const {
 	             << ", RtpTS=" << rtpTimestamp() << ", packetCount=" << packetCount()
 	             << ", octetCount=" << octetCount();
 
-	for (unsigned i = 0; i < unsigned(header.reportCount()); i++) {
-		getReportBlock(i)->log();
-	}
+	for (int i = 0; i < header.reportCount(); i++)
+		if (const auto *reportBlock = getReportBlock(i))
+			reportBlock->log();
 }
 
 unsigned int RtcpSdesItem::Size(uint8_t textLength) { return textLength + 2; }
@@ -395,6 +430,7 @@ long RtcpSdesChunk::safelyCountChunkSize(size_t maxChunkSize) const {
 			return -1;
 		}
 		textsLength.push_back(itemLength);
+		size += RtcpSdesItem::Size(itemLength);
 		// safely to access next item
 		item = getItem(++i);
 	}
@@ -480,9 +516,19 @@ void RtcpSdes::preparePacket(uint8_t chunkCount) {
 	header.prepareHeader(202, chunkCount, length);
 }
 
-const RtcpReportBlock *RtcpRr::getReportBlock(int num) const { return &_reportBlocks + num; }
+const RtcpReportBlock *RtcpRr::getReportBlock(int num) const {
+	if (num < 0 || num >= int((header.lengthInBytes() - 4) / sizeof(RtcpReportBlock)))
+		return nullptr;
 
-RtcpReportBlock *RtcpRr::getReportBlock(int num) { return &_reportBlocks + num; }
+	return &_reportBlocks + num;
+}
+
+RtcpReportBlock *RtcpRr::getReportBlock(int num) {
+	if (num < 0 || num >= int((header.lengthInBytes() - 4) / sizeof(RtcpReportBlock)))
+		return nullptr;
+
+	return &_reportBlocks + num;
+}
 
 size_t RtcpRr::SizeWithReportBlocks(uint8_t reportCount) {
 	return sizeof(header) + 4 + size_t(reportCount) * sizeof(RtcpReportBlock);
@@ -513,9 +559,9 @@ void RtcpRr::log() const {
 	PLOG_VERBOSE << "RTCP RR: "
 	             << " SSRC=" << ntohl(_senderSSRC);
 
-	for (unsigned i = 0; i < unsigned(header.reportCount()); i++) {
-		getReportBlock(i)->log();
-	}
+	for (int i = 0; i < header.reportCount(); i++)
+		if (const auto *reportBlock = getReportBlock(i))
+			reportBlock->log();
 }
 
 size_t RtcpRemb::SizeWithSSRCs(int count) { return sizeof(RtcpRemb) + (count - 1) * sizeof(SSRC); }
@@ -545,18 +591,61 @@ void RtcpRemb::preparePacket(SSRC senderSSRC, unsigned int numSSRC, unsigned int
 
 void RtcpRemb::setBitrate(unsigned int numSSRC, unsigned int in_bitrate) {
 	unsigned int exp = 0;
-	while (in_bitrate > pow(2, 18) - 1) {
+	while (in_bitrate > 0x3FFFF) {
 		exp++;
 		in_bitrate /= 2;
 	}
 
 	// "length" in packet is one less than the number of 32 bit words in the packet.
-	header.header.setLength(uint16_t((offsetof(RtcpRemb, _ssrc) / sizeof(uint32_t)) - 1 + numSSRC));
+	header.header.setLength(uint16_t((offsetof(RtcpRemb, _ssrcs) / sizeof(uint32_t)) + numSSRC - 1));
 
 	_bitrate = htonl((numSSRC << (32u - 8u)) | (exp << (32u - 8u - 6u)) | in_bitrate);
 }
 
-void RtcpRemb::setSsrc(int iterator, SSRC newSssrc) { _ssrc[iterator] = htonl(newSssrc); }
+SSRC RtcpRemb::getSSRC(int num) const {
+    if (num < 0 || num >= getSSRCCount())
+        throw std::out_of_range("SSRC num out of range");
+    return ntohl(_ssrcs[num]);
+}
+void RtcpRemb::setSSRC(int num, SSRC newSsrc) {
+    if (num < 0 || num >= getSSRCCount())
+        throw std::out_of_range("SSRC num out of range");
+    _ssrcs[num] = htonl(newSsrc);
+}
+
+bool RtcpRemb::hasValidId() const {
+	return _id[0] == 'R' && _id[1] == 'E' && _id[2] == 'M' && _id[3] == 'B';
+}
+
+int RtcpRemb::getSSRCCount() const {
+	return std::min(
+		int(ntohl(_bitrate) >> 24u),
+		std::max(int(header.header.length() + 1 - offsetof(RtcpRemb, _ssrcs) / sizeof(uint32_t)), 0));
+}
+
+unsigned int RtcpRemb::getBitrate() const {
+	uint32_t br = ntohl(_bitrate);
+	uint8_t exp = (br << 8u) >> 26u;
+	return (br & 0x3FFFF) * static_cast<unsigned int>(pow(2, exp));
+}
+
+void RtcpRemb::setSsrc(int num, SSRC newSsrc) {
+    if (num < 0 || num >= getSSRCCount())
+		throw std::out_of_range("SSRC num out of range");
+    _ssrcs[num] = htonl(newSsrc);
+}
+
+unsigned int RtcpRemb::getNumSSRC() const {
+	return unsigned(getSSRCCount());
+}
+
+unsigned int RtcpRemb::getNumSSRC() {
+	return unsigned(getSSRCCount());
+}
+
+unsigned int RtcpRemb::getBitrate() {
+	return std::as_const(*this).getBitrate();
+}
 
 unsigned int RtcpPli::Size() { return sizeof(RtcpFbHeader); }
 
@@ -568,14 +657,38 @@ void RtcpPli::preparePacket(SSRC messageSSRC) {
 
 void RtcpPli::log() const { header.log(); }
 
-unsigned int RtcpFir::Size() { return sizeof(RtcpFbHeader) + sizeof(RtcpFirPart); }
+SSRC RtcpFirFci::getSSRC() const { return ntohl(_ssrc); }
 
-void RtcpFir::preparePacket(SSRC messageSSRC, uint8_t seqNo) {
-	header.header.prepareHeader(206, 4, 2 + 2 * 1);
-	header.setPacketSenderSSRC(messageSSRC);
-	header.setMediaSourceSSRC(messageSSRC);
-	parts[0].ssrc = htonl(messageSSRC);
-	parts[0].seqNo = seqNo;
+uint8_t RtcpFirFci::getSeqNo() const { return _seqNo; }
+
+void RtcpFirFci::preparePacket(SSRC ssrc, uint8_t seqNo) {
+	_ssrc = htonl(ssrc);
+	_seqNo = seqNo;
+	_dummy1 = 0;
+	_dummy2 = 0;
+}
+
+size_t RtcpFir::SizeWithFcis(int count) {
+	return sizeof(RtcpFir) + (count - 1) * sizeof(RtcpFirFci);
+}
+
+int RtcpFir::getFciCount() const {
+	return int((header.header.lengthInBytes() - sizeof(RtcpFbHeader)) / sizeof(RtcpFirFci));
+}
+
+const RtcpFirFci *RtcpFir::getFci(int num) const {
+	if (num < 0 || num >= getFciCount())
+		return nullptr;
+	return &_fcis[num];
+}
+
+void RtcpFir::preparePacket(SSRC senderSSRC, const std::vector<RtcpFirFci> &fcis) {
+	header.header.prepareHeader(
+	    206, 4, uint16_t((offsetof(RtcpFir, _fcis) / sizeof(uint32_t)) + (2 * fcis.size()) - 1));
+	header.setPacketSenderSSRC(senderSSRC);
+	header.setMediaSourceSSRC(0);
+	for (size_t i = 0; i < fcis.size(); ++i)
+		_fcis[i] = fcis[i];
 }
 
 void RtcpFir::log() const { header.log(); }
@@ -607,7 +720,12 @@ unsigned int RtcpNack::Size(unsigned int discreteSeqNoCount) {
 	return offsetof(RtcpNack, parts) + sizeof(RtcpNackPart) * discreteSeqNoCount;
 }
 
-unsigned int RtcpNack::getSeqNoCount() { return header.header.length() - 2; }
+unsigned int RtcpNack::getSeqNoCount() {
+	if (header.header.length() < 2)
+		return 0;
+
+	return header.header.length() - 2;
+}
 
 void RtcpNack::preparePacket(SSRC ssrc, unsigned int discreteSeqNoCount) {
 	header.header.prepareHeader(205, 1, 2 + uint16_t(discreteSeqNoCount));
@@ -631,6 +749,42 @@ bool RtcpNack::addMissingPacket(unsigned int *fciCount, uint16_t *fciPID, uint16
 	}
 }
 
+size_t RtcpApp::SizeWithData(size_t dataLength) {
+	return sizeof(RtcpHeader) + sizeof(SSRC) + 4 + dataLength;
+}
+
+SSRC RtcpApp::ssrc() const { return ntohl(_ssrc); }
+
+uint8_t RtcpApp::subtype() const { return header.reportCount(); }
+
+RtcpAppName RtcpApp::name() const { return {_name[0], _name[1], _name[2], _name[3]}; }
+
+const char *RtcpApp::data() const { return _data; }
+
+size_t RtcpApp::dataSize() const {
+	size_t totalSize = header.lengthInBytes();
+	size_t headerAndName = sizeof(RtcpHeader) + sizeof(SSRC) + 4;
+	return totalSize > headerAndName ? totalSize - headerAndName : 0;
+}
+
+void RtcpApp::preparePacket(SSRC ssrc, const RtcpAppName &name, uint8_t subtype, size_t dataLength) {
+	uint16_t lengthField =
+	    uint16_t((sizeof(SSRC) + 4 + dataLength) / 4); // in 32-bit words, minus 1 for header
+	header.prepareHeader(204, subtype, lengthField);
+	setSSRC(ssrc);
+	setName(name);
+}
+
+void RtcpApp::setSSRC(SSRC ssrc) { _ssrc = htonl(ssrc); }
+
+void RtcpApp::setName(const RtcpAppName &name) { std::memcpy(_name, name.data(), 4); }
+
+void RtcpApp::log() const {
+	header.log();
+	PLOG_VERBOSE << "RTCP APP: ssrc=" << ssrc() << ", subtype=" << unsigned(subtype())
+	             << ", name=" << name();
+}
+
 uint16_t RtpRtx::getOriginalSeqNo() const { return ntohs(*(uint16_t *)(header.getBody())); }
 
 const char *RtpRtx::getBody() const { return header.getBody() + sizeof(uint16_t); }
@@ -644,10 +798,12 @@ size_t RtpRtx::getBodySize(size_t totalSize) const {
 size_t RtpRtx::getSize() const { return header.getSize() + sizeof(uint16_t); }
 
 size_t RtpRtx::normalizePacket(size_t totalSize, SSRC originalSSRC, uint8_t originalPayloadType) {
+	if (totalSize < getSize())
+		throw std::invalid_argument("Packet size is too small for RTX");
+
 	header.setSeqNumber(getOriginalSeqNo());
 	header.setSsrc(originalSSRC);
 	header.setPayloadType(originalPayloadType);
-	// TODO, the -12 is the size of the header (which is variable!)
 	memmove(header.getBody(), getBody(), totalSize - getSize());
 	return totalSize - 2;
 }

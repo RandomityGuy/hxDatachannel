@@ -1,4 +1,10 @@
-cmake_minimum_required(VERSION 3.0)
+if(${CMAKE_VERSION} VERSION_LESS 3.27.0)
+    cmake_minimum_required(VERSION 3.0)
+elseif(${CMAKE_VERSION} VERSION_LESS 3.31.0)
+    cmake_minimum_required(VERSION 3.6)
+else()
+    cmake_minimum_required(VERSION 3.10)
+endif()
 
 project(plog VERSION 1.1.10 LANGUAGES CXX)
 

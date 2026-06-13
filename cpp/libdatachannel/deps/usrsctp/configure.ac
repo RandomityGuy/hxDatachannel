@@ -105,7 +105,15 @@ AC_ARG_ENABLE(debug,
     enable_debug=$enableval,enable_debug=yes)
 if test x$enable_debug = xyes; then
         AC_DEFINE(SCTP_DEBUG, 1, [Provide debug information])
-        CFLAGS="$CFLAGS -g -O0"
+        CFLAGS="$CFLAGS -g"
+fi
+
+AC_ARG_ENABLE(opt,
+  AC_HELP_STRING( [--enable-opt],
+                  [optimize code @<:@default=yes@:>@]),
+    enable_opt=$enableval,enable_opt=yes)
+if test x$enable_opt != xyes; then
+        CFLAGS="$CFLAGS -O0"
 fi
 
 AC_ARG_ENABLE(inet,
@@ -171,9 +179,12 @@ AC_CHECK_MEMBER(struct sockaddr_in6.sin6_len,
                  #endif
                  #include <netinet/in.h>])
 
+x_save_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -I$srcdir"
 AC_CHECK_MEMBER(struct sockaddr_conn.sconn_len,
                 AC_DEFINE(HAVE_SCONN_LEN, 1, [Define this if your userland stack has sconn_len in sockaddr_conn struct.]),,
                 [#include "usrsctplib/usrsctp.h"])
+CFLAGS="$x_save_CFLAGS"
 
 AC_MSG_CHECKING(for socklen_t)
 AC_TRY_COMPILE([#ifdef HAVE_SYS_TYPES_H

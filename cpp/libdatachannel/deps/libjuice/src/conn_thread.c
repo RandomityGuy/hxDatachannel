@@ -173,7 +173,7 @@ int conn_thread_init(juice_agent_t *agent, conn_registry_t *registry, udp_socket
 		return -1;
 	}
 
-	mutex_init(&conn_impl->mutex, 0);
+	mutex_init(&conn_impl->mutex, MUTEX_RECURSIVE); // Recursive to allow calls from user callbacks
 	mutex_init(&conn_impl->send_mutex, 0);
 
 	agent->conn_impl = conn_impl;
@@ -229,7 +229,8 @@ int conn_thread_interrupt(juice_agent_t *agent) {
 	JLOG_VERBOSE("Interrupting connection thread");
 
 	mutex_lock(&conn_impl->send_mutex);
-	if (udp_sendto_self(conn_impl->sock, NULL, 0) < 0) {
+	char dummy = 0; // Some C libraries might error out on NULL pointers
+	if (udp_sendto_self(conn_impl->sock, &dummy, 0) < 0) {
 		if (sockerrno != SEAGAIN && sockerrno != SEWOULDBLOCK) {
 			JLOG_WARN("Failed to interrupt poll by triggering socket, errno=%d", sockerrno);
 		}
@@ -259,6 +260,7 @@ int conn_thread_send(juice_agent_t *agent, const addr_record_t *dst, const char 
 
 	int ret = udp_sendto(conn_impl->sock, data, size, dst);
 	if (ret < 0) {
+		ret = -sockerrno;
 		if (sockerrno == SEAGAIN || sockerrno == SEWOULDBLOCK)
 			JLOG_INFO("Send failed, buffer is full");
 		else if (sockerrno == SEMSGSIZE)
@@ -276,4 +278,3 @@ int conn_thread_get_addrs(juice_agent_t *agent, addr_record_t *records, size_t s
 
 	return udp_get_addrs(conn_impl->sock, records, size);
 }
-

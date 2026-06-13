@@ -94,6 +94,23 @@ extern "C" {
 #define SRTP_MAX_TRAILER_LEN (SRTP_MAX_TAG_LEN + SRTP_MAX_MKI_LEN)
 
 /**
+ * SRTP_SRCTP_INDEX_LEN is the size the SRTCP index which is
+ * 4 bytes
+ */
+#define SRTP_SRCTP_INDEX_LEN 4
+
+/**
+ * SRTP_MAX_SRTCP_TRAILER_LEN is the maximum length of the SRTCP trailer
+ * (index, authentication tag and MKI) supported by libSRTP.  This value is
+ * the maximum number of octets that will be added to an RTCP packet by
+ * srtp_protect_rtcp().
+ *
+ * @brief the maximum number of octets added by srtp_protect().
+ */
+#define SRTP_MAX_SRTCP_TRAILER_LEN                                             \
+    (SRTP_SRCTP_INDEX_LEN + SRTP_MAX_TAG_LEN + SRTP_MAX_MKI_LEN)
+
+/**
  * SRTP_MAX_NUM_MASTER_KEYS is the maximum number of Master keys for
  * MKI supported by libSRTP.
  *
@@ -194,8 +211,9 @@ typedef enum {
                                         /**< invalid                         */
     srtp_err_status_pkt_idx_old = 26,   /**< packet index is too old to      */
                                         /**< consider                        */
-    srtp_err_status_pkt_idx_adv = 27    /**< packet index advanced, reset    */
+    srtp_err_status_pkt_idx_adv = 27,   /**< packet index advanced, reset    */
                                         /**< needed                          */
+    srtp_err_status_cryptex_err = 28    /**< cryptex error                   */
 } srtp_err_status_t;
 
 typedef struct srtp_ctx_t_ srtp_ctx_t;
@@ -614,7 +632,7 @@ srtp_err_status_t srtp_add_stream(srtp_t session, const srtp_policy_t *policy);
  *    - [other]           otherwise.
  *
  */
-srtp_err_status_t srtp_remove_stream(srtp_t session, unsigned int ssrc);
+srtp_err_status_t srtp_remove_stream(srtp_t session, uint32_t ssrc);
 
 /**
  * @brief srtp_update() updates all streams in the session.
@@ -1167,7 +1185,7 @@ typedef enum {
     srtp_profile_null_sha1_80 = 5,
     srtp_profile_null_sha1_32 = 6,
     srtp_profile_aead_aes_128_gcm = 7,
-    srtp_profile_aead_aes_256_gcm = 8,
+    srtp_profile_aead_aes_256_gcm = 8
 } srtp_profile_t;
 
 /**
@@ -1289,7 +1307,7 @@ void srtp_append_salt_to_key(unsigned char *key,
  * packet, and assumes that the RTCP packet is aligned on a 32-bit
  * boundary.
  *
- * @warning This function assumes that it can write SRTP_MAX_TRAILER_LEN+4
+ * @warning This function assumes that it can write SRTP_MAX_SRTCP_TRAILER_LEN
  * into the location in memory immediately following the RTCP packet.
  * Callers MUST ensure that this much writable memory is available in
  * the buffer that holds the RTCP packet.
@@ -1330,7 +1348,7 @@ srtp_err_status_t srtp_protect_rtcp(srtp_t ctx,
  * packet, and assumes that the RTCP packet is aligned on a 32-bit
  * boundary.
  *
- * @warning This function assumes that it can write SRTP_MAX_TRAILER_LEN+4
+ * @warning This function assumes that it can write SRTP_MAX_SRTCP_TRAILER_LEN
  * into the location in memory immediately following the RTCP packet.
  * Callers MUST ensure that this much writable memory is available in
  * the buffer that holds the RTCP packet.
@@ -1728,6 +1746,24 @@ srtp_err_status_t srtp_set_stream_roc(srtp_t session,
 srtp_err_status_t srtp_get_stream_roc(srtp_t session,
                                       uint32_t ssrc,
                                       uint32_t *roc);
+
+/**
+ * @brief srtp_set_stream_use_cryptex(session, ssrc, enable)
+ *
+ * Enable cryptex, RFC 9335, processing for the stream identified by the given
+ * SSRC. For wildcard SSRC types the cryptex setting is applied to the session
+ * template and any streams created from it.
+ *
+ * @param session is the SRTP session containing the stream to update.
+ * @param ssrc describes the SSRC to enable cryptex for.
+ * @param enable whether to enable sending and receiving cryptex.
+ *
+ * @returns srtp_err_status_ok on success, or srtp_err_status_bad_param if the
+ * stream or template cannot be found for the given SSRC.
+ */
+srtp_err_status_t srtp_set_stream_use_cryptex(srtp_t session,
+                                              const srtp_ssrc_t *ssrc,
+                                              int enable);
 
 /**
  * @}

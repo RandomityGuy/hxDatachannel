@@ -46,10 +46,11 @@ gnutls_datum_t make_datum(char *data, size_t size);
 #include "mbedtls/error.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/rsa.h"
-#include "mbedtls/sha1.h"
 #include "mbedtls/sha256.h"
+#include "mbedtls/sha1.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
+#include "mbedtls/ssl.h"
 
 namespace rtc::mbedtls {
 
@@ -89,6 +90,8 @@ bool check(int success, const string &message = "OpenSSL error");
 bool check_error(int err, const string &message = "OpenSSL error");
 
 BIO *BIO_new_from_file(const string &filename);
+
+void SSL_CTX_add_cert_to_store_from_pem(SSL_CTX *ctx, const string &pem);
 
 } // namespace rtc::openssl
 

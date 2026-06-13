@@ -13,7 +13,9 @@
 
 #include "channel.hpp"
 #include "common.hpp"
-#include "configuration.hpp" // for ProxyServer
+#include "configuration.hpp"
+
+#include <map>
 
 namespace rtc {
 
@@ -21,7 +23,7 @@ namespace impl {
 
 struct WebSocket;
 
-}
+} // namespace impl
 
 class RTC_CPP_EXPORT WebSocket final : private CheshireCat<impl::WebSocket>, public Channel {
 public:
@@ -32,19 +34,9 @@ public:
 		Closed = 3,
 	};
 
-	struct Configuration {
-		bool disableTlsVerification = false; // if true, don't verify the TLS certificate
-		optional<ProxyServer> proxyServer;   // only non-authenticated http supported for now
-		std::vector<string> protocols;
-		optional<std::chrono::milliseconds> connectionTimeout; // zero to disable
-		optional<std::chrono::milliseconds> pingInterval;      // zero to disable
-		optional<int> maxOutstandingPings;
-		optional<string> caCertificatePemFile;
-		optional<string> certificatePemFile;
-		optional<string> keyPemFile;
-		optional<string> keyPemPass;
-		optional<size_t> maxMessageSize;
-	};
+	using Configuration = WebSocketConfiguration;
+
+	using Headers = std::map<string, string, case_insensitive_less>;
 
 	WebSocket();
 	WebSocket(Configuration config);
@@ -57,7 +49,7 @@ public:
 	bool isClosed() const override;
 	size_t maxMessageSize() const override;
 
-	void open(const string &url);
+	void open(const string &url, const Headers &headers = {});
 	void close() override;
 	void forceClose();
 	bool send(const message_variant data) override;
@@ -65,10 +57,13 @@ public:
 
 	optional<string> remoteAddress() const;
 	optional<string> path() const;
+	std::multimap<string, string, case_insensitive_less> requestHeaders() const;
 
 private:
 	using CheshireCat<impl::WebSocket>::impl;
 };
+
+std::ostream &operator<<(std::ostream &out, WebSocket::State state);
 
 } // namespace rtc
 

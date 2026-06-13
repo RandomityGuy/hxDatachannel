@@ -12,7 +12,10 @@
 #if RTC_ENABLE_MEDIA
 
 #include "mediahandler.hpp"
+#include "description.hpp"
+#include "rtp.hpp"
 
+#include <mutex>
 #include <queue>
 #include <unordered_map>
 
@@ -24,17 +27,27 @@ public:
 
 	RtcpNackResponder(size_t maxSize = DefaultMaxSize);
 
+	void media(const Description::Media &desc) override;
 	void incoming(message_vector &messages, const message_callback &send) override;
 	void outgoing(message_vector &messages, const message_callback &send) override;
 
 private:
+	message_ptr wrapInRtx(const message_ptr &original);
+
+	// RTX state populated by media() from SDP inspection
+	optional<SSRC> mRtxSsrc;
+	std::unordered_map<int, int> mRtxPayloadTypeMap; // original PT -> RTX PT
+	uint16_t mRtxSequenceNumber = 0;
+	bool mRtxEnabled = false;
+	std::mutex mMutex;
+
 	// Packet storage
 	class RTC_CPP_EXPORT Storage {
 
 		/// Packet storage element
 		struct RTC_CPP_EXPORT Element {
-			Element(binary_ptr packet, uint16_t sequenceNumber, shared_ptr<Element> next = nullptr);
-			const binary_ptr packet;
+			Element(message_ptr packet, uint16_t sequenceNumber, shared_ptr<Element> next = nullptr);
+			const message_ptr packet;
 			const uint16_t sequenceNumber;
 			/// Pointer to newer element
 			shared_ptr<Element> next = nullptr;
@@ -59,11 +72,11 @@ private:
 		Storage(size_t _maxSize);
 
 		/// Returns packet with given sequence number
-		optional<binary_ptr> get(uint16_t sequenceNumber);
+		message_ptr get(uint16_t sequenceNumber);
 
 		/// Stores packet
 		/// @param packet Packet
-		void store(binary_ptr packet);
+		void store(message_ptr packet);
 	};
 
 	const shared_ptr<Storage> mStorage;

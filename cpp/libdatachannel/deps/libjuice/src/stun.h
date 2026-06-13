@@ -297,6 +297,9 @@ typedef enum stun_password_algorithm {
 
 #define STUN_MAX_PASSWORD_ALGORITHMS_VALUE_SIZE 256
 
+// RFC 5766: When forming a CreatePermission request, the client MUST include at least one XOR-PEER-ADDRESS attribute, and MAY include more than one such attribute.
+#define STUN_MAX_PEER_ADDRESSES 8
+
 typedef struct stun_credentials {
 	char username[STUN_MAX_USERNAME_LEN];
 	char realm[STUN_MAX_REALM_LEN];
@@ -326,7 +329,8 @@ typedef struct stun_message {
 	bool has_fingerprint;
 
 	// TURN
-	addr_record_t peer;
+	addr_record_t peers[STUN_MAX_PEER_ADDRESSES];
+	size_t peers_size;
 	addr_record_t relayed;
 	addr_record_t alternate_server;
 	const char *data;
@@ -370,6 +374,7 @@ const char *stun_get_error_reason(unsigned int code);
 // Export for tests
 JUICE_EXPORT bool _juice_is_stun_datagram(const void *data, size_t size);
 JUICE_EXPORT int _juice_stun_read(void *data, size_t size, stun_message_t *msg);
+JUICE_EXPORT int _juice_stun_write(void *buf, size_t size, const stun_message_t *msg, const char *password);
 JUICE_EXPORT bool _juice_stun_check_integrity(void *buf, size_t size, const stun_message_t *msg,
                                               const char *password);
 

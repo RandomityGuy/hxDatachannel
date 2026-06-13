@@ -14,6 +14,7 @@
 #include "ice.h"
 #include "juice.h"
 #include "stun.h"
+#include "tcp.h"
 #include "thread.h"
 #include "timestamp.h"
 #include "turn.h"
@@ -26,6 +27,7 @@
 #define LAST_STUN_RETRANSMISSION_TIMEOUT (MIN_STUN_RETRANSMISSION_TIMEOUT * 16)
 #define MAX_STUN_CHECK_RETRANSMISSION_COUNT 6  // exponential backoff, total 39500ms
 #define MAX_STUN_SERVER_RETRANSMISSION_COUNT 5 // total 23500ms
+#define STUN_TCP_TIMEOUT LAST_STUN_RETRANSMISSION_TIMEOUT
 
 // RFC 8445: ICE agents SHOULD use a default Ta value, 50 ms, but MAY use another value based on the
 // characteristics of the associated data.
@@ -113,6 +115,8 @@ typedef struct agent_stun_entry {
 	timestamp_t next_transmission;
 	timediff_t retransmission_timeout;
 	int retransmissions;
+	bool transaction_id_expired;
+	tcp_state_t tcp_state;
 
 	// TURN
 	agent_turn_state_t *turn;
@@ -125,6 +129,7 @@ struct juice_agent {
 	juice_config_t config;
 	juice_state_t state;
 	agent_mode_t mode;
+	juice_ice_tcp_mode_t ice_tcp_mode;
 
 	ice_description_t local;
 	ice_description_t remote;
@@ -143,6 +148,7 @@ struct juice_agent {
 	timestamp_t nomination_timestamp;
 	bool gathering_done;
 
+	conn_registry_t *registry;
 	int conn_index;
 	void *conn_impl;
 
@@ -158,6 +164,8 @@ int agent_resolve_servers(juice_agent_t *agent);
 int agent_get_local_description(juice_agent_t *agent, char *buffer, size_t size);
 int agent_set_remote_description(juice_agent_t *agent, const char *sdp);
 int agent_add_remote_candidate(juice_agent_t *agent, const char *sdp);
+int agent_set_local_ice_attributes(juice_agent_t *agent, const char *ufrag, const char *pwd);
+int agent_add_turn_server(juice_agent_t *agent, const juice_turn_server_t *turn_server);
 int agent_set_remote_gathering_done(juice_agent_t *agent);
 int agent_send(juice_agent_t *agent, const char *data, size_t size, int ds);
 int agent_direct_send(juice_agent_t *agent, const addr_record_t *dst, const char *data, size_t size,
@@ -172,6 +180,7 @@ int agent_get_selected_candidate_pair(juice_agent_t *agent, ice_candidate_t *loc
 
 int agent_conn_recv(juice_agent_t *agent, char *buf, size_t len, const addr_record_t *src);
 int agent_conn_update(juice_agent_t *agent, timestamp_t *next_timestamp);
+int agent_conn_tcp_state(juice_agent_t *agent, const addr_record_t *dst, tcp_state_t state);
 int agent_conn_fail(juice_agent_t *agent);
 
 int agent_input(juice_agent_t *agent, char *buf, size_t len, const addr_record_t *src,
@@ -214,6 +223,7 @@ int agent_add_local_reflexive_candidate(juice_agent_t *agent, ice_candidate_type
                                         const addr_record_t *record);
 int agent_add_remote_reflexive_candidate(juice_agent_t *agent, ice_candidate_type_t type,
                                          uint32_t priority, const addr_record_t *record);
+int agent_add_local_tcp_active_candidate(juice_agent_t *agent, addr_record_t *record);
 int agent_add_candidate_pair(juice_agent_t *agent, ice_candidate_t *local,
                              ice_candidate_t *remote); // local may be NULL
 int agent_add_candidate_pairs_for_remote(juice_agent_t *agent, ice_candidate_t *remote);
@@ -232,5 +242,6 @@ agent_stun_entry_t *
 agent_find_entry_from_record(juice_agent_t *agent, const addr_record_t *record,
                              const addr_record_t *relayed); // relayed may be NULL
 void agent_translate_host_candidate_entry(juice_agent_t *agent, agent_stun_entry_t *entry);
+int agent_set_ice_tcp_mode(juice_agent_t *agent, juice_ice_tcp_mode_t ice_tcp_mode);
 
 #endif

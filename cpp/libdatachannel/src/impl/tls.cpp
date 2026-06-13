@@ -101,7 +101,7 @@ bool check(int ret, const string &message) {
 	if (ret < 0) {
 		if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE ||
 		    ret == MBEDTLS_ERR_SSL_ASYNC_IN_PROGRESS || ret == MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS ||
-		    ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+		    ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY || ret == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET)
 			return false;
 
 		const size_t bufferSize = 1024;
@@ -158,7 +158,11 @@ void init() {
 
 	std::lock_guard lock(mutex);
 	if (!std::exchange(done, true)) {
-		OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS, nullptr);
+		uint64_t ssl_opts = OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_LOAD_CRYPTO_STRINGS;
+#ifdef OPENSSL_INIT_NO_ATEXIT
+		ssl_opts |= OPENSSL_INIT_NO_ATEXIT;
+#endif
+		OPENSSL_init_ssl(ssl_opts, nullptr);
 		OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS, nullptr);
 	}
 }
@@ -224,6 +228,45 @@ BIO *BIO_new_from_file(const string &filename) {
 		BIO_free(bio);
 		return nullptr;
 	}
+}
+
+void SSL_CTX_add_cert_to_store_from_pem(SSL_CTX *ctx, const string &pem) {
+	X509_STORE *store = SSL_CTX_get_cert_store(ctx);
+	if (!store) {
+		throw std::runtime_error("Failed to get certificate store");
+	}
+
+	BIO *bio = BIO_new(BIO_s_mem());
+	BIO_write(bio, pem.data(), int(pem.size()));
+	STACK_OF(X509_INFO) *certs = PEM_X509_INFO_read_bio(bio, nullptr, nullptr, nullptr);
+	BIO_free(bio);
+	if (!certs) {
+		throw std::runtime_error("Failed to load PEM certificate");
+	}
+
+	for (int i = 0; i < sk_X509_INFO_num(certs); i++) {
+		X509_INFO *value = sk_X509_INFO_value(certs, i);
+		if (value->x509) {
+			if (!X509_STORE_add_cert(store, value->x509)) {
+				unsigned long error = ERR_get_error();
+				if (ERR_GET_REASON(error) != X509_R_CERT_ALREADY_IN_HASH_TABLE) {
+					sk_X509_INFO_pop_free(certs, X509_INFO_free);
+					throw std::runtime_error("Failed to add certificate to store: " +
+					                         openssl::error_string(error));
+				}
+			}
+		}
+		if (value->crl) {
+			if (!X509_STORE_add_crl(store, value->crl)) {
+				unsigned long error = ERR_get_error();
+				sk_X509_INFO_pop_free(certs, X509_INFO_free);
+				throw std::runtime_error("Failed to add CRL to store: " +
+				                         openssl::error_string(error));
+			}
+		}
+	}
+
+	sk_X509_INFO_pop_free(certs, X509_INFO_free);
 }
 
 } // namespace rtc::openssl

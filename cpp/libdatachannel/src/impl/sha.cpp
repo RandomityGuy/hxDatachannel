@@ -13,6 +13,7 @@
 #if USE_GNUTLS
 
 #include <nettle/sha1.h>
+#include <nettle/version.h>
 
 #elif USE_MBEDTLS
 
@@ -21,7 +22,7 @@
 #else
 
 #ifndef OPENSSL_API_COMPAT
-#define OPENSSL_API_COMPAT 0x10100000L
+#define OPENSSL_API_COMPAT 0x10101000L
 #endif
 
 #include <openssl/sha.h>
@@ -39,7 +40,11 @@ binary Sha1(const byte *data, size_t size) {
 	struct sha1_ctx ctx;
 	sha1_init(&ctx);
 	sha1_update(&ctx, size, reinterpret_cast<const uint8_t *>(data));
+#if NETTLE_VERSION_MAJOR >= 4
+	sha1_digest(&ctx, reinterpret_cast<uint8_t *>(output.data()));
+#else
 	sha1_digest(&ctx, SHA1_DIGEST_SIZE, reinterpret_cast<uint8_t *>(output.data()));
+#endif
 	return output;
 
 #elif USE_MBEDTLS

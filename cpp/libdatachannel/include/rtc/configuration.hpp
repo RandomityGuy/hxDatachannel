@@ -72,10 +72,12 @@ struct RTC_CPP_EXPORT Configuration {
 	// Options
 	CertificateType certificateType = CertificateType::Default;
 	TransportPolicy iceTransportPolicy = TransportPolicy::All;
-	bool enableIceTcp = false;    // libnice only
+	bool enableIceTcp = false;
 	bool enableIceUdpMux = false; // libjuice only
 	bool disableAutoNegotiation = false;
+	bool disableAutoGathering = false;
 	bool forceMediaTransport = false;
+	bool disableFingerprintVerification = false;
 
 	// Port range
 	uint16_t portRangeBegin = 1024;
@@ -86,7 +88,42 @@ struct RTC_CPP_EXPORT Configuration {
 
 	// Local maximum message size for Data Channels
 	optional<size_t> maxMessageSize;
+
+	// Certificates and private keys
+	optional<string> certificatePemFile;
+	optional<string> keyPemFile;
+	optional<string> keyPemPass;
 };
+
+#ifdef RTC_ENABLE_WEBSOCKET
+
+struct WebSocketConfiguration {
+	bool disableTlsVerification = false; // if true, don't verify the TLS certificate
+	optional<ProxyServer> proxyServer;   // only non-authenticated http supported for now
+	std::vector<string> protocols;
+	optional<std::chrono::milliseconds> tcpConnectionTimeout; // zero to disable
+	optional<std::chrono::milliseconds> connectionTimeout;    // zero to disable
+	optional<std::chrono::milliseconds> pingInterval;         // zero to disable
+	optional<int> maxOutstandingPings;
+	optional<string> caCertificatePemFile;
+	optional<string> certificatePemFile;
+	optional<string> keyPemFile;
+	optional<string> keyPemPass;
+	optional<size_t> maxMessageSize;
+};
+
+struct WebSocketServerConfiguration {
+	uint16_t port = 8080;
+	bool enableTls = false;
+	optional<string> certificatePemFile;
+	optional<string> keyPemFile;
+	optional<string> keyPemPass;
+	optional<string> bindAddress;
+	optional<std::chrono::milliseconds> connectionTimeout;
+	optional<size_t> maxMessageSize;
+};
+
+#endif
 
 } // namespace rtc
 

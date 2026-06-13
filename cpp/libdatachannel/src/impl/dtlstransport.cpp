@@ -33,10 +33,12 @@ void DtlsTransport::enqueueRecv() {
 	if (mPendingRecvCount > 0)
 		return;
 
-	if (auto shared_this = weak_from_this().lock()) {
-		++mPendingRecvCount;
-		ThreadPool::Instance().enqueue(&DtlsTransport::doRecv, std::move(shared_this));
-	}
+	++mPendingRecvCount;
+
+	ThreadPool::Instance().enqueue([weak_this = weak_from_this()]() {
+		if (auto locked = weak_this.lock())
+			locked->doRecv();
+	});
 }
 
 #if USE_GNUTLS
@@ -53,7 +55,8 @@ DtlsTransport::DtlsTransport(shared_ptr<IceTransport> lower, certificate_ptr cer
                              verifier_callback verifierCallback, state_callback stateChangeCallback)
     : Transport(lower, std::move(stateChangeCallback)), mMtu(mtu), mCertificate(certificate),
       mFingerprintAlgorithm(fingerprintAlgorithm), mVerifierCallback(std::move(verifierCallback)),
-      mIsClient(lower->role() == Description::Role::Active) {
+      mIsClient(lower->role() == Description::Role::Active),
+      mIncomingQueue(RECV_QUEUE_LIMIT, message_size_func) {
 
 	PLOG_DEBUG << "Initializing DTLS transport (GnuTLS)";
 
@@ -380,7 +383,8 @@ DtlsTransport::DtlsTransport(shared_ptr<IceTransport> lower, certificate_ptr cer
                              verifier_callback verifierCallback, state_callback stateChangeCallback)
     : Transport(lower, std::move(stateChangeCallback)), mMtu(mtu), mCertificate(certificate),
       mFingerprintAlgorithm(fingerprintAlgorithm), mVerifierCallback(std::move(verifierCallback)),
-      mIsClient(lower->role() == Description::Role::Active) {
+      mIsClient(lower->role() == Description::Role::Active),
+      mIncomingQueue(RECV_QUEUE_LIMIT, message_size_func) {
 
 	PLOG_DEBUG << "Initializing DTLS transport (MbedTLS)";
 
@@ -394,27 +398,24 @@ DtlsTransport::DtlsTransport(shared_ptr<IceTransport> lower, certificate_ptr cer
 	mbedtls_ctr_drbg_set_prediction_resistance(&mDrbg, MBEDTLS_CTR_DRBG_PR_ON);
 
 	try {
-		mbedtls::check(mbedtls_ctr_drbg_seed(&mDrbg, mbedtls_entropy_func, &mEntropy, NULL, 0),
-		               "Failed creating Mbed TLS Context");
+		mbedtls::check(mbedtls_ctr_drbg_seed(&mDrbg, mbedtls_entropy_func, &mEntropy, NULL, 0));
 
 		mbedtls::check(mbedtls_ssl_config_defaults(
 		                   &mConf, mIsClient ? MBEDTLS_SSL_IS_CLIENT : MBEDTLS_SSL_IS_SERVER,
-		                   MBEDTLS_SSL_TRANSPORT_DATAGRAM, MBEDTLS_SSL_PRESET_DEFAULT),
-		               "Failed creating Mbed TLS Context");
+		                   MBEDTLS_SSL_TRANSPORT_DATAGRAM, MBEDTLS_SSL_PRESET_DEFAULT));
 
+		mbedtls_ssl_conf_max_version(&mConf, MBEDTLS_SSL_MAJOR_VERSION_3, MBEDTLS_SSL_MINOR_VERSION_3); // TLS 1.2
 		mbedtls_ssl_conf_authmode(&mConf, MBEDTLS_SSL_VERIFY_OPTIONAL);
 		mbedtls_ssl_conf_verify(&mConf, DtlsTransport::CertificateCallback, this);
-
 		mbedtls_ssl_conf_rng(&mConf, mbedtls_ctr_drbg_random, &mDrbg);
 
 		auto [crt, pk] = mCertificate->credentials();
-		mbedtls::check(mbedtls_ssl_conf_own_cert(&mConf, crt.get(), pk.get()),
-		               "Failed creating Mbed TLS Context");
+		mbedtls::check(mbedtls_ssl_conf_own_cert(&mConf, crt.get(), pk.get()));
 
 		mbedtls_ssl_conf_dtls_cookies(&mConf, NULL, NULL, NULL);
 		mbedtls_ssl_conf_dtls_srtp_protection_profiles(&mConf, srtpSupportedProtectionProfiles);
 
-		mbedtls::check(mbedtls_ssl_setup(&mSsl, &mConf), "Failed creating Mbed TLS Context");
+		mbedtls::check(mbedtls_ssl_setup(&mSsl, &mConf));
 
 		mbedtls_ssl_set_export_keys_cb(&mSsl, DtlsTransport::ExportKeysCallback, this);
 		mbedtls_ssl_set_bio(&mSsl, this, WriteCallback, ReadCallback, NULL);
@@ -659,7 +660,7 @@ int DtlsTransport::ReadCallback(void *ctx, unsigned char *buf, size_t len) {
 
 			auto bufMin = std::min(len, size_t(message->size()));
 			std::memcpy(buf, message->data(), bufMin);
-			return int(len);
+			return int(bufMin);
 		}
 
 		// Closed
@@ -732,7 +733,9 @@ DtlsTransport::DtlsTransport(shared_ptr<IceTransport> lower, certificate_ptr cer
                              verifier_callback verifierCallback, state_callback stateChangeCallback)
     : Transport(lower, std::move(stateChangeCallback)), mMtu(mtu), mCertificate(certificate),
       mFingerprintAlgorithm(fingerprintAlgorithm), mVerifierCallback(std::move(verifierCallback)),
-      mIsClient(lower->role() == Description::Role::Active) {
+      mIsClient(lower->role() == Description::Role::Active),
+      mIncomingQueue(RECV_QUEUE_LIMIT, message_size_func) {
+
 	PLOG_DEBUG << "Initializing DTLS transport (OpenSSL)";
 
 	if (!mCertificate)
@@ -760,7 +763,7 @@ DtlsTransport::DtlsTransport(shared_ptr<IceTransport> lower, certificate_ptr cer
 		                   CertificateCallback);
 		SSL_CTX_set_verify_depth(mCtx, 1);
 
-		openssl::check(SSL_CTX_set_cipher_list(mCtx, "ALL:!LOW:!EXP:!RC4:!MD5:@STRENGTH"),
+		openssl::check(SSL_CTX_set_cipher_list(mCtx, "ALL:!SHA256:!SHA384:!aPSK:!ECDSA+SHA1:!ADH:!LOW:!EXP:!MD5:!3DES:!SSLv3:!TLSv1"),
 		               "Failed to set SSL priorities");
 
 #if OPENSSL_VERSION_NUMBER >= 0x30000000
@@ -893,8 +896,11 @@ void DtlsTransport::incoming(message_ptr message) {
 	}
 
 	PLOG_VERBOSE << "Incoming size=" << message->size();
-	mIncomingQueue.push(message);
-	enqueueRecv();
+	if(mIncomingQueue.tryPush(message)) {
+		enqueueRecv();
+	} else {
+		PLOG_VERBOSE << "DTLS incoming queue is full, dropping";
+	}
 }
 
 bool DtlsTransport::outgoing(message_ptr message) {
@@ -940,13 +946,14 @@ void DtlsTransport::doRecv() {
 			if (demuxMessage(message))
 				continue;
 
-			BIO_write(mInBio, message->data(), int(message->size()));
-
+			bool incomingWritten = false;
 			if (state() == State::Connecting) {
 				// Continue the handshake
 				int ret, err;
 				{
 					std::lock_guard lock(mSslMutex);
+					BIO_write(mInBio, message->data(), int(message->size()));
+					incomingWritten = true;
 					ret = SSL_do_handshake(mSsl);
 					err = SSL_get_error(mSsl, ret);
 				}
@@ -969,6 +976,8 @@ void DtlsTransport::doRecv() {
 				int ret, err;
 				{
 					std::lock_guard lock(mSslMutex);
+					if (!incomingWritten)
+						BIO_write(mInBio, message->data(), int(message->size()));
 					ret = SSL_read(mSsl, buffer, bufferSize);
 					err = SSL_get_error(mSsl, ret);
 				}
