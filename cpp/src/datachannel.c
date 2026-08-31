@@ -361,12 +361,22 @@ HL_PRIM void HL_NAME(set_buffered_amount_low_threshold)(hl_rtc_datachannel* dc, 
 
 HL_PRIM void HL_NAME(process_events)()
 {
-    bool looped = false;
-    while (datachannel_callbacks != NULL)
+    while (true)
     {
-        datachannel_callback* res = datachannel_callbacks;
-
+        datachannel_callback* res = NULL;
         hl_mutex_acquire(callback_result_mutex);
+        if (datachannel_callbacks != NULL)
+        {
+            res = datachannel_callbacks;
+            datachannel_callbacks = datachannel_callbacks->next;
+            if (datachannel_callbacks == NULL)
+                datachannel_callbacks_end = NULL;
+        }
+        hl_mutex_release(callback_result_mutex);
+
+        if (res == NULL)
+            break;
+
         hl_rtc_datachannel* hldc = hl_rtc_make_datachannel(res->dc);
 
         vdynamic* args[2];
@@ -376,7 +386,6 @@ HL_PRIM void HL_NAME(process_events)()
         args[0] = &pcarg;
 
         char buffer[256];
-        // printf("handling callback: onDatachannel\n");
         if (rtcGetDataChannelLabel(hldc->dc, buffer, 256) >= 0)
         {
             vdynamic arg;
@@ -398,78 +407,67 @@ HL_PRIM void HL_NAME(process_events)()
             hl_dyn_call(res->pc->datachannelCb, args, 2);
         }
 
-        
-        datachannel_callbacks = datachannel_callbacks->next;
         free(res);
-        hl_mutex_release(callback_result_mutex);
-
-        looped = true;
     }
-    if (looped) 
+
+    // Regular callbacks: one semaphore token per queued item.
+    while (true)
     {
-        hl_mutex_acquire(callback_result_mutex);
-        datachannel_callbacks_end = NULL;
-        hl_mutex_release(callback_result_mutex);
-    }
-    looped = false;
-    while (callback_results != NULL)
-    {
-        callback_result* res = callback_results;
-
-        if (hl_semaphore_try_acquire(callback_result_semaphore, NULL))
-        {
-            hl_mutex_acquire(callback_result_mutex);
-            vdynamic* args[2];
-            vdynamic arg1 = res->arg1;
-            vdynamic arg2 = res->arg2;
-            if (res->args >= 1 && res->arg1.t == &hlt_bytes)
-            {
-                arg1.v.bytes = (vbyte*)hl_gc_alloc_noptr(res->arg1Size);
-                memcpy(arg1.v.bytes, res->arg1.v.bytes, res->arg1Size);
-                free(res->arg1.v.bytes);
-            }
-            if (res->args >= 2 && res->arg2.t == &hlt_bytes)
-            {
-                arg2.v.bytes = (vbyte*)hl_gc_alloc_noptr(res->arg2Size);
-                memcpy(arg2.v.bytes, res->arg2.v.bytes, res->arg2Size);
-                free(res->arg2.v.bytes);
-            }
-            // printf("handling callback: %s\n", res->callback_name);
-            if (res->closure != NULL)
-            {
-                switch (res->args)
-                {
-                case 0:
-                    hl_dyn_call(*res->closure, NULL, 0);
-                    break;
-
-                case 1:
-                    args[0] = &arg1;
-                    hl_dyn_call(*res->closure, args, 1);
-                    break;
-
-                case 2:
-                    args[0] = &arg1;
-                    args[1] = &arg2;
-                    hl_dyn_call(*res->closure, args, 2);
-                    break;
-                }
-            }
-
-            callback_results = callback_results->next;
-            free(res);
-            hl_mutex_release(callback_result_mutex);
-
-            looped = true;
-        }
-        else
+        if (!hl_semaphore_try_acquire(callback_result_semaphore, NULL))
             break;
-    }
-    if (looped)
-    {
+
+        callback_result* res = NULL;
         hl_mutex_acquire(callback_result_mutex);
-        callback_results_end = NULL;
+        if (callback_results != NULL)
+        {
+            res = callback_results;
+            callback_results = callback_results->next;
+            if (callback_results == NULL)
+                callback_results_end = NULL;
+        }
         hl_mutex_release(callback_result_mutex);
+
+        if (res == NULL)
+            break;
+
+        vdynamic* args[2];
+        vdynamic arg1 = res->arg1;
+        vdynamic arg2 = res->arg2;
+        if (res->args >= 1 && res->arg1.t == &hlt_bytes)
+        {
+            arg1.v.bytes = (vbyte*)hl_gc_alloc_noptr(res->arg1Size);
+            memcpy(arg1.v.bytes, res->arg1.v.bytes, res->arg1Size);
+            free(res->arg1.v.bytes);
+        }
+        if (res->args >= 2 && res->arg2.t == &hlt_bytes)
+        {
+            arg2.v.bytes = (vbyte*)hl_gc_alloc_noptr(res->arg2Size);
+            memcpy(arg2.v.bytes, res->arg2.v.bytes, res->arg2Size);
+            free(res->arg2.v.bytes);
+        }
+
+        if (res->closure != NULL)
+        {
+            switch (res->args)
+            {
+            case 0:
+                hl_dyn_call(*res->closure, NULL, 0);
+                break;
+
+            case 1:
+                args[0] = &arg1;
+                hl_dyn_call(*res->closure, args, 1);
+                break;
+
+            case 2:
+                args[0] = &arg1;
+                args[1] = &arg2;
+                hl_dyn_call(*res->closure, args, 2);
+                break;
+            }
+        }
+
+        free(res);
     }
 }
 
@@ -498,8 +496,8 @@ static void RTC_API descriptionCallback(int pc, const char* sdp, const char* typ
     res->arg1Size = sdpLen + 1;
     res->arg2Size = typeLen + 1;
     res->callback_name = "onDescription";
-    hl_semaphore_release(callback_result_semaphore);
     hl_mutex_release(callback_result_mutex);
+    hl_semaphore_release(callback_result_semaphore);
 }
 
 static void RTC_API candidateCallback(int pc, const char* cand, const char* mid, void* ptr)
@@ -519,8 +517,8 @@ static void RTC_API candidateCallback(int pc, const char* cand, const char* mid,
     res->args = 1;
     res->arg1Size = sdpLen + 1;
     res->callback_name = "onCandidate";
-    hl_semaphore_release(callback_result_semaphore);
     hl_mutex_release(callback_result_mutex);
+    hl_semaphore_release(callback_result_semaphore);
 }
 
 static void RTC_API stateChangeCallback(int pc, rtcState state, void* ptr) 
@@ -534,8 +532,8 @@ static void RTC_API stateChangeCallback(int pc, rtcState state, void* ptr)
     res->closure = &hlpc->stateCb;
     res->args = 1;
     res->callback_name = "onStateChange";
-    hl_semaphore_release(callback_result_semaphore);
     hl_mutex_release(callback_result_mutex);
+    hl_semaphore_release(callback_result_semaphore);
 }
 
 static void RTC_API gatheringStateCallback(int pc, rtcGatheringState state, void* ptr)
@@ -549,8 +547,8 @@ static void RTC_API gatheringStateCallback(int pc, rtcGatheringState state, void
     res->closure = &hlpc->gatheringStateCb;
     res->args = 1;
     res->callback_name = "onGatheringStateChange";
-    hl_semaphore_release(callback_result_semaphore);
     hl_mutex_release(callback_result_mutex);
+    hl_semaphore_release(callback_result_semaphore);
 }
 
 static void RTC_API openCallback(int id, void* ptr) 
@@ -569,8 +567,8 @@ static void RTC_API openCallback(int id, void* ptr)
         res->closure = &hldc->openCb;
         res->args = 1;
         res->callback_name = "onOpen";
-        hl_semaphore_release(callback_result_semaphore);
         hl_mutex_release(callback_result_mutex);
+        hl_semaphore_release(callback_result_semaphore);
     }
     else 
     {
@@ -583,8 +581,8 @@ static void RTC_API openCallback(int id, void* ptr)
         res->closure = &hldc->openCb;
         res->args = 1;
         res->callback_name = "onOpen";
-        hl_semaphore_release(callback_result_semaphore);
         hl_mutex_release(callback_result_mutex);
+        hl_semaphore_release(callback_result_semaphore);
     }
 }
 
@@ -597,8 +595,8 @@ static void RTC_API closedCallback(int id, void* ptr)
     res->closure = &hldc->closedCb;
     res->args = 0;
     res->callback_name = "onClose";
-    hl_semaphore_release(callback_result_semaphore);
     hl_mutex_release(callback_result_mutex);
+    hl_semaphore_release(callback_result_semaphore);
 }
 
 static void RTC_API errorCallback(int id, const char* error, void* ptr) 
@@ -616,8 +614,8 @@ static void RTC_API errorCallback(int id, const char* error, void* ptr)
     res->closure = &hldc->errCb;
     res->args = 1;
     res->callback_name = "onError";
-    hl_semaphore_release(callback_result_semaphore);
     hl_mutex_release(callback_result_mutex);
+    hl_semaphore_release(callback_result_semaphore);
 }
 
 static void RTC_API messageCallback(int id, const char* message, int size, void* ptr) 
@@ -640,8 +638,8 @@ static void RTC_API messageCallback(int id, const char* message, int size, void*
         res->closure = &hldc->msgCb;
         res->args = 2;
         res->callback_name = "onMessage";
-        hl_semaphore_release(callback_result_semaphore);
         hl_mutex_release(callback_result_mutex);
+        hl_semaphore_release(callback_result_semaphore);
     }
     else 
     {
@@ -656,8 +654,8 @@ static void RTC_API messageCallback(int id, const char* message, int size, void*
         res->closure = &hldc->msgCb;
         res->args = 2;
         res->callback_name = "onMessage";
-        hl_semaphore_release(callback_result_semaphore);
         hl_mutex_release(callback_result_mutex);
+        hl_semaphore_release(callback_result_semaphore);
     }
 }
 
@@ -682,8 +680,8 @@ static void RTC_API bufferedAmountLowCallback(int dc, void* ptr)
     res->closure = &hldc->bufferLowCb;
     res->args = 0;
     res->callback_name = "onBufferLow";
-    hl_semaphore_release(callback_result_semaphore);
     hl_mutex_release(callback_result_mutex);
+    hl_semaphore_release(callback_result_semaphore);
 }
 
 DEFINE_PRIM(_VOID, initialize, _NO_ARG);
